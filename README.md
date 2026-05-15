@@ -9,6 +9,24 @@ sales exports before copying data into another accounting system.
 It is intentionally read-only. It does not create, update, delete, pay, cancel,
 send, or mutate SimpleShop records.
 
+## Install as a Plugin
+
+`simpleshop-mcp` ships as a Claude Code / Cowork plugin. In either client:
+
+```text
+/plugin marketplace add mikz/simpleshop-mcp
+/plugin install simpleshop-mcp@simpleshop-mcp
+```
+
+When the plugin is enabled the host prompts for **SimpleShop login** and
+**SimpleShop API key**. The API key is masked, stored in your OS keychain, and
+injected into the MCP server's environment at launch.
+
+Requirements on the host machine:
+
+- `uvx` on `PATH` (install with [uv](https://docs.astral.sh/uv/))
+- Python 3.13 (`uvx` will fetch one if missing)
+
 ## Features
 
 - Find SimpleShop documents across invoices, proformas, receipts, orders, tax
@@ -136,6 +154,12 @@ SIMPLESHOP_TIMEOUT_SECONDS=30
 Do not commit `.env` or real API credentials.
 
 ## Running
+
+> The plugin's MCP server config lives inline in `.claude-plugin/plugin.json`
+> (uses `uvx --from ${CLAUDE_PLUGIN_ROOT}` + `${user_config.*}` env injection).
+> No `.mcp.json` is committed at the repo root, so workspace-mode Claude Code
+> sessions in this directory do not try to launch the server — run it with
+> one of the commands below instead.
 
 Run the MCP server over stdio:
 

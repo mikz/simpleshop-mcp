@@ -1,0 +1,13 @@
+{
+  "name": "simpleshop-mcp",
+  "description": "Single-plugin marketplace for the SimpleShop MCP server",
+  "owner": { "name": "Michal Cichra", "url": "https://github.com/mikz" },
+  "plugins": [
+    {
+      "name": "simpleshop-mcp",
+      "source": "./",
+      "description": "Read-only SimpleShop MCP server for accounting agents",
+      "category": "productivity"
+    }
+  ]
+}
