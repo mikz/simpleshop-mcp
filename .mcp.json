@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "simpleshop": {
+      "command": "uv",
+      "args": ["run", "--locked", "simpleshop-mcp"]
+    }
+  }
+}
