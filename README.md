@@ -27,12 +27,18 @@ send, or mutate SimpleShop records.
 ## Tool Surface
 
 ```text
+simpleshop_test_login
 simpleshop_find_documents
 simpleshop_download_documents
 simpleshop_find_products
 simpleshop_get_product_sales
 simpleshop_get_metadata
 ```
+
+`simpleshop_test_login` takes no arguments and is the quickest way to confirm
+your `.env` credentials work — it calls SimpleShop's `test/` endpoint and
+returns `{ "ok": true }` on success or a structured `{ "ok": false, "error": ... }`
+otherwise.
 
 Finder tools use a concrete `query` object with a required `mode` field:
 

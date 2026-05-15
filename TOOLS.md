@@ -6,6 +6,7 @@ SimpleShop data.
 The exposed hard-cut surface is:
 
 ```text
+simpleshop_test_login
 simpleshop_find_documents
 simpleshop_download_documents
 simpleshop_find_products
@@ -48,6 +49,28 @@ built-in pagination remains for MCP component lists only, not business data page
 Response-shaping flags such as `include_pdf_resources`, `include_raw`,
 `include_customer_pii`, and `include_variants` are deliberately excluded from the
 cursor filter hash.
+
+## `simpleshop_test_login`
+
+Verify that the configured `SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY` are
+accepted by SimpleShop. Hits the `GET test/` endpoint with no side effects.
+Takes no arguments.
+
+```json
+{ "ok": true }
+```
+
+When credentials are rejected or the API is unreachable:
+
+```json
+{
+  "ok": false,
+  "error": { "code": "unauthorized", "message": "Authentication failed - company not found." }
+}
+```
+
+Error codes: `unauthorized` (401), `forbidden` (403), `simpleshop_error` (other
+API failures), `network_error` (DNS/connect/timeout).
 
 ## `simpleshop_find_documents`
 

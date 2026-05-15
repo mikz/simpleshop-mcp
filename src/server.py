@@ -10,6 +10,7 @@ from datetime import date
 from io import StringIO
 from typing import Annotated, Any, Literal
 
+import httpx
 from fastmcp import FastMCP
 from fastmcp.server.context import Context
 from fastmcp.server.lifespan import lifespan
@@ -656,6 +657,11 @@ class MetadataResult(BaseModel):
     flags: list[MetadataEntry] = Field(default_factory=list)
 
 
+class TestLoginResult(BaseModel):
+    ok: bool
+    error: ErrorInfo | None = None
+
+
 class SearchCursor(BaseModel):
     v: int = 1
     kind: Literal["documents", "products"]
@@ -664,6 +670,33 @@ class SearchCursor(BaseModel):
     limit: int
     sort: str
     filter_hash: str
+
+
+@mcp.tool
+async def simpleshop_test_login(ctx: Context) -> TestLoginResult:
+    """Verify that the configured SimpleShop credentials are accepted by the API."""
+    return await _run_test_login(_client_from_context(ctx))
+
+
+async def _run_test_login(client: SimpleShopClient) -> TestLoginResult:
+    try:
+        await client.health_check()
+        return TestLoginResult(ok=True)
+    except SimpleShopError as exc:
+        return TestLoginResult(ok=False, error=_login_error_info(exc))
+    except httpx.RequestError as exc:
+        return TestLoginResult(
+            ok=False,
+            error=ErrorInfo(code="network_error", message=str(exc)),
+        )
+
+
+def _login_error_info(exc: SimpleShopError) -> ErrorInfo:
+    if exc.status_code == 401:
+        return ErrorInfo(code="unauthorized", message=str(exc))
+    if exc.status_code == 403:
+        return ErrorInfo(code="forbidden", message=str(exc))
+    return ErrorInfo(code="simpleshop_error", message=str(exc))
 
 
 @mcp.tool

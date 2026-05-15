@@ -41,6 +41,8 @@ function calls. Direct calls bypass FastMCP's argument binding and do not repres
 
 Smoke test all tools:
 
+- `simpleshop_test_login` (success with real credentials; `error.code ==
+  "unauthorized"` when a deliberately invalid API key is injected)
 - `simpleshop_find_documents`
 - `simpleshop_download_documents`
 - `simpleshop_find_products`

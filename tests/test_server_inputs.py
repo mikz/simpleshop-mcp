@@ -45,6 +45,7 @@ async def test_exposed_tool_catalog_matches_locked_design(dummy_simpleshop_env: 
         tools = await client.list_tools()
 
     assert [tool.name for tool in tools] == [
+        "simpleshop_test_login",
         "simpleshop_find_documents",
         "simpleshop_download_documents",
         "simpleshop_find_products",
