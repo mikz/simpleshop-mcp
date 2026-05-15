@@ -1,0 +1,19 @@
+[tools]
+python = "3.13.13"
+uv = "0.11.14"
+
+[tasks.sync]
+description = "Install locked Python dependencies"
+run = "uv sync --locked"
+
+[tasks.test]
+description = "Run the test suite"
+run = "uv run --locked pytest"
+
+[tasks.lint]
+description = "Run Ruff lint checks"
+run = "uv run --locked ruff check ."
+
+[tasks.mcp]
+description = "Run the SimpleShop MCP server over stdio with autoreload"
+run = "uv run --locked fastmcp run src/server.py --reload --reload-dir src --no-banner"

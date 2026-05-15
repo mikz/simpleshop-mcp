@@ -1,0 +1,88 @@
+from __future__ import annotations
+
+from typing import Any
+
+
+def invoice_fixture(**overrides: Any) -> dict[str, Any]:
+    invoice: dict[str, Any] = {
+        "id": 12149248,
+        "id_identity": 0,
+        "id_customer": 42,
+        "id_number_series": 267244,
+        "id_payment_method": 33662,
+        "id_center": 0,
+        "id_tag": 0,
+        "id_predkontace": 0,
+        "id_cleneniDPH": 0,
+        "id_coupon": 0,
+        "id_parent": 0,
+        "type": 1,
+        "flags": 3,
+        "number": "FA260024",
+        "date_created": "2026-05-12",
+        "date_due": "2026-05-23",
+        "date_taxable_supply": "2026-05-12",
+        "date_paid": "2026-05-13",
+        "customer_IC": "12345678",
+        "customer_DIC": "CZ12345678",
+        "customer_IDNUM3": "",
+        "customer_name": "Ukazkova Firma",
+        "customer_firstname": "",
+        "customer_lastname": "",
+        "customer_street": "Poulicni 79/C",
+        "customer_city": "Praha",
+        "customer_zip": "10300",
+        "customer_country_code": "CZ",
+        "customer_tel": "123456789",
+        "mail_to": ["buyer@example.com"],
+        "VS": "72600024",
+        "currency": "CZK",
+        "total": "1206.64",
+        "total_without_vat": "1049.25",
+        "test_mode": False,
+        "storno": False,
+        "oss": False,
+        "need_attention": False,
+        "url_public_webpage": "https://public.example/document/",
+        "url_online_payment": "https://public.example/pay/",
+        "url_download_pdf": "https://public.example/export/document/?download=1",
+        "url_download_pdf_no_stamp": "https://public.example/export/document/?download=1&nostamp=1",
+        "url_app_detail": "https://app.simpleshop.cz/faktury/detail/12149248/",
+        "items": [
+            {
+                "quantity": "1",
+                "unit": "ks",
+                "text": "Stirac na ponorku",
+                "unit_price": "990.25",
+                "vat_rate": "15",
+                "vat_rate_type": 9,
+                "vat": "148.54",
+                "total": "1138.79",
+                "total_without_vat": "990.25",
+                "data": [],
+            },
+            {
+                "quantity": "1",
+                "unit": "ks",
+                "text": "Doprava",
+                "unit_price": "59.00",
+                "vat_rate": "15",
+                "vat_rate_type": 9,
+                "vat": "8.85",
+                "total": "67.85",
+                "total_without_vat": "59.00",
+                "data": [],
+            },
+        ],
+        "vats": [
+            {
+                "vat_rate": "15",
+                "vat_rate_type": 9,
+                "base": "1049.25",
+                "vat": "157.39",
+                "total": "1206.64",
+            }
+        ],
+    }
+    invoice.update(overrides)
+    return invoice
