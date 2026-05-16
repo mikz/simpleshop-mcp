@@ -31,8 +31,8 @@ def control_totals(records: list[AccountingDocument]) -> ControlTotals:
     serializable_currency = {
         currency: {
             "count": int(values["count"]),
-            "total": str(values["total"]),
-            "total_without_vat": str(values["total_without_vat"]),
+            "total": _format_money(values["total"]),
+            "total_without_vat": _format_money(values["total_without_vat"]),
         }
         for currency, values in by_currency.items()
     }
@@ -73,12 +73,16 @@ def summarize_sales(records: list[AccountingDocument]) -> dict[str, Any]:
         "by_vat_rate": {
             rate: {
                 "count": int(values["count"]),
-                "base": str(values["base"]),
-                "vat": str(values["vat"]),
-                "total": str(values["total"]),
+                "base": _format_money(values["base"]),
+                "vat": _format_money(values["vat"]),
+                "total": _format_money(values["total"]),
             }
             for rate, values in by_vat_rate.items()
         },
         "by_payment_method": dict(by_payment_method),
         "by_paid_state": by_paid_state,
     }
+
+
+def _format_money(value: Decimal | int) -> str:
+    return str(Decimal(value).quantize(Decimal("0.01")))

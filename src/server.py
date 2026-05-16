@@ -10,6 +10,7 @@ import secrets
 import threading
 import unicodedata
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from typing import Annotated, Any, Literal
@@ -29,7 +30,7 @@ from prefab_ui.rx import Rx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from client import NotAuthenticatedError, SimpleShopClient, SimpleShopError
-from models import DOCUMENT_TYPE_LABELS, AccountingDocument, RawProduct
+from models import DOCUMENT_TYPE_LABELS, AccountingDocument, PaymentInstructions, RawProduct
 from normalization import normalize_invoice
 from reports import make_ledger_export
 from settings import load_settings, store_credentials
@@ -143,7 +144,10 @@ async def simpleshop_login(
             ctx,
             mode="direct",
             status="error",
-            message="mode=direct requires credentials.email and credentials.api_key.",
+            message=(
+                "mode=direct accepts credentials in the tool call and requires "
+                "credentials.email and credentials.api_key."
+            ),
             ok=False,
         )
     return _login_result_from_submit(ctx, "direct", _login_on_submit(credentials))
@@ -533,8 +537,8 @@ class FindDocumentsQuery(BaseModel):
     number: str | None = None
     variable_symbol: str | None = None
     currency: str | None = None
-    total: float | None = None
-    total_without_vat: float | None = None
+    total: Decimal | None = None
+    total_without_vat: Decimal | None = None
     days_due: int | None = None
     payment_state: PaymentState = "any"
     cancellation_state: CancellationState = "active"
@@ -713,19 +717,17 @@ class FoundDocument(BaseModel):
     number: str | None = None
     variable_symbol: str | None = None
     document_type: str | None = None
-    document_type_code: int | None = None
-    flags: int | None = None
-    decoded_flags: list[str] = Field(default_factory=list)
+    parent_id: int | None = None
     states: DocumentStates | None = None
     dates: DocumentDates | None = None
     currency: str | None = None
     total: str | None = None
     total_without_vat: str | None = None
+    payment_instructions: PaymentInstructions = Field(default_factory=PaymentInstructions)
     customer: dict[str, Any] = Field(default_factory=dict)
     product_ids: list[int] = Field(default_factory=list)
     pdf_resources: list[PdfResource] = Field(default_factory=list)
     line_items: list[dict[str, Any]] = Field(default_factory=list)
-    raw_ids: dict[str, Any] = Field(default_factory=dict)
     raw: dict[str, Any] | None = None
     error: ErrorInfo | None = None
 
@@ -738,13 +740,11 @@ class FoundDocument(BaseModel):
         include_customer_pii: bool,
     ) -> FoundDocument:
         return cls(
-            id=record.source_id,
-            number=record.source_number,
+            id=record.id,
+            number=record.number,
             variable_symbol=record.variable_symbol,
             document_type=record.document_type_label,
-            document_type_code=record.document_type,
-            flags=record.flags,
-            decoded_flags=record.decoded_flags,
+            parent_id=_nonzero_int_or_none(record.raw_ids.get("id_parent")),
             states=DocumentStates(
                 paid=record.paid,
                 canceled=record.canceled,
@@ -763,15 +763,13 @@ class FoundDocument(BaseModel):
                 paid=record.date_paid,
             ),
             currency=record.currency,
-            total=str(record.total) if record.total is not None else None,
-            total_without_vat=str(record.total_without_vat)
-            if record.total_without_vat is not None
-            else None,
+            total=_format_money(record.total),
+            total_without_vat=_format_money(record.total_without_vat),
+            payment_instructions=record.payment_instructions,
             customer=_customer_payload(record, include_customer_pii=include_customer_pii),
             product_ids=_product_ids_from_record(record),
             pdf_resources=_pdf_resources(record) if include_pdf_resources else [],
-            line_items=[item.model_dump(mode="json") for item in record.line_items],
-            raw_ids=record.raw_ids,
+            line_items=[_line_item_payload(item) for item in record.line_items],
         )
 
 
@@ -869,7 +867,6 @@ class Purchase(BaseModel):
     currency: str | None = None
     payment_method: str | None = None
     coupon: str | None = None
-    invoice_number: str | None = None
 
 
 class ProductSale(BaseModel):
@@ -925,14 +922,13 @@ class ProductSale(BaseModel):
                 name=mapped.get("item_name"),
                 quantity=mapped.get("quantity"),
                 unit=mapped.get("unit"),
-                total=mapped.get("item_total"),
+                total=_format_money(mapped.get("item_total")),
             ),
             purchase=Purchase(
-                total=mapped.get("purchase_total"),
+                total=_format_money(mapped.get("purchase_total")),
                 currency=mapped.get("currency"),
                 payment_method=mapped.get("payment_method"),
                 coupon=mapped.get("coupon"),
-                invoice_number=mapped.get("invoice_number"),
             ),
             custom_fields=custom_fields if include_customer_pii else {},
         )
@@ -1187,9 +1183,25 @@ async def simpleshop_get_metadata(
             "https://jsapi.apiary.io/apis/simpleshopcz.apib",
         ],
         comparison_fields={
+            "money_format": "fixed_two_decimal_string",
+            "bank_account_format": "account/bank_code",
+            "bank_account_fields": [
+                "payment_instructions.bank_account",
+                "payment_instructions.iban",
+            ],
             "document_date_filters": ["created_from", "created_to", "paid_from", "paid_to"],
-            "payment_fields": ["variable_symbol", "currency", "total", "total_without_vat"],
+            "payment_fields": [
+                "payment_instructions.variable_symbol",
+                "payment_instructions.constant_symbol",
+                "payment_instructions.specific_symbol",
+                "payment_instructions.amount",
+                "payment_instructions.currency",
+            ],
             "paid_date_source_field": "date_paid",
+            "payment_state_note": (
+                "SimpleShop exposes intended receiving-account instructions and document "
+                "paid state, not matched bank transaction evidence."
+            ),
         },
         payment_methods=await client.payment_methods() if include_payment_methods else [],
         number_series=await client.number_series() if include_number_series else [],
@@ -1356,10 +1368,10 @@ async def _download_document(
         return DownloadedDocument(
             id=document_id,
             ok=True,
-            number=record.source_number,
+            number=record.number,
             document_type=record.document_type_label,
             variant=variant,
-            filename=_pdf_filename(record.source_number, variant),
+            filename=_pdf_filename(record.number, variant),
             mime_type=_normalize_pdf_mime_type(content_type),
             size_bytes=len(content),
             sha256=hashlib.sha256(content).hexdigest(),
@@ -1467,13 +1479,13 @@ def _pdf_resources(record: AccountingDocument) -> list[PdfResource]:
     return [
         PdfResource(
             variant="with_stamp",
-            filename=_pdf_filename(record.source_number, "with_stamp"),
-            resource_uri=f"simpleshop://documents/{record.source_id}/pdf/with_stamp",
+            filename=_pdf_filename(record.number, "with_stamp"),
+            resource_uri=f"simpleshop://documents/{record.id}/pdf/with_stamp",
         ),
         PdfResource(
             variant="without_stamp",
-            filename=_pdf_filename(record.source_number, "without_stamp"),
-            resource_uri=f"simpleshop://documents/{record.source_id}/pdf/without_stamp",
+            filename=_pdf_filename(record.number, "without_stamp"),
+            resource_uri=f"simpleshop://documents/{record.id}/pdf/without_stamp",
         ),
     ]
 
@@ -1487,6 +1499,22 @@ def _product_ids_from_record(record: AccountingDocument) -> list[int]:
                 if isinstance(product, dict) and product.get("vfproductid"):
                     product_ids.add(int(product["vfproductid"]))
     return sorted(product_ids)
+
+
+def _line_item_payload(item: Any) -> dict[str, Any]:
+    payload = item.model_dump(mode="json")
+    for key in ("unit_price", "vat", "total", "total_without_vat"):
+        payload[key] = _format_money(payload.get(key))
+    return payload
+
+
+def _format_money(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return str(Decimal(str(value)).quantize(Decimal("0.01")))
+    except (InvalidOperation, ValueError):
+        return str(value)
 
 
 def _product_payload(product: RawProduct, *, include_variants: bool) -> FoundProduct:
@@ -1690,6 +1718,11 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _nonzero_int_or_none(value: Any) -> int | None:
+    parsed = _int_or_none(value)
+    return parsed or None
 
 
 def _error_info(exc: Exception) -> ErrorInfo:

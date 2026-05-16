@@ -347,10 +347,18 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
     assert payload.currency == "CZK"
     assert payload.total == "1206.64"
     assert payload.total_without_vat == "1049.25"
+    assert payload.payment_instructions.variable_symbol == "72600024"
+    assert payload.payment_instructions.amount == "1206.64"
+    assert payload.payment_instructions.currency == "CZK"
+    assert payload.payment_instructions.payment_method_id == 33662
     assert payload.product_ids == [145235]
     assert payload.pdf_resources[0].resource_uri.endswith("/with_stamp")
     assert payload.customer["redacted"] is True
     assert "email" not in payload.customer
+    payload_json = payload.model_dump_json()
+    assert '"document_type_code"' not in payload_json
+    assert '"decoded_flags"' not in payload_json
+    assert '"raw_ids"' not in payload_json
 
     payload_with_pii = _document_payload(
         record,
@@ -444,6 +452,7 @@ def test_buyer_csv_columns_are_normalized_for_agents() -> None:
     assert _buyer_column_key("Číslo dokladu") == "cislo dokladu"
     assert sale.document_number == "FA260024"
     assert sale.purchase.total == "1206.64"
+    assert not hasattr(sale.purchase, "invoice_number")
     assert sale.buyer.email == "buyer@example.com"
     assert sale.buyer.company_id == "12345678"
     assert sale.custom_fields == {"Vlastní pole": "ABC"}

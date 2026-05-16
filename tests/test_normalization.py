@@ -14,11 +14,18 @@ def test_has_flag_decodes_simple_shop_bitmask() -> None:
 
 
 def test_normalize_invoice_preserves_accounting_fields() -> None:
-    document = normalize_invoice(invoice_fixture())
+    document = normalize_invoice(
+        invoice_fixture(
+            bank_account=" 2603445200 / 2010 ",
+            iban=" cz65 0800 0000 1920 0014 5399 ",
+            bic=" fio bcz pp xxx ",
+            KS="0308",
+            SS="55",
+        )
+    )
 
-    assert document.source_system == "simpleshop"
-    assert document.source_key == "simpleshop:12149248"
-    assert document.source_number == "FA260024"
+    assert document.id == 12149248
+    assert document.number == "FA260024"
     assert document.variable_symbol == "72600024"
     assert document.document_type_label == "invoice"
     assert document.paid is True
@@ -35,10 +42,19 @@ def test_normalize_invoice_preserves_accounting_fields() -> None:
     assert len(document.line_items) == 2
     assert document.line_items[0].text == "Stirac na ponorku"
     assert document.vat_breakdown[0].vat == Decimal("157.39")
-    assert document.source_urls.download_pdf is not None
+    assert document.urls.download_pdf is not None
+    assert document.payment_instructions.bank_account == "2603445200/2010"
+    assert document.payment_instructions.iban == "CZ6508000000192000145399"
+    assert document.payment_instructions.bic == "FIOBCZPPXXX"
+    assert document.payment_instructions.variable_symbol == "72600024"
+    assert document.payment_instructions.constant_symbol == "0308"
+    assert document.payment_instructions.specific_symbol == "55"
+    assert document.payment_instructions.amount == "1206.64"
+    assert document.payment_instructions.currency == "CZK"
+    assert document.payment_instructions.payment_method_id == 33662
 
 
-def test_normalize_invoice_preserves_source_facts_without_judgment_fields() -> None:
+def test_normalize_invoice_preserves_api_facts_without_judgment_fields() -> None:
     document = normalize_invoice(
         invoice_fixture(
             flags=int(InvoiceFlag.HAS_VAT) | int(InvoiceFlag.CANCELED),
@@ -62,7 +78,7 @@ def test_normalize_invoice_preserves_source_facts_without_judgment_fields() -> N
     assert document.total == Decimal("-100.00")
     assert document.customer.email is None
     assert document.line_items == []
-    assert document.source_urls.download_pdf is None
+    assert document.urls.download_pdf is None
 
 
 def test_normalize_invoice_ignores_undocumented_flag_bits() -> None:

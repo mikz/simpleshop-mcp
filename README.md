@@ -20,8 +20,9 @@ send, or mutate SimpleShop records.
 
 The server starts without credentials. To sign in, call the
 `simpleshop_login` MCP tool. It supports `mode: "auto" | "direct" | "prefab" |
-"web"`: Apps-capable clients get an inline Prefab form, clients such as Codex can
-use direct arguments or a localhost web form. The server validates credentials
+"web"`: Apps-capable clients get an inline Prefab form, and other clients can
+use `mode: "direct"` with `email` and `api_key` in the tool call or a localhost
+web form. The server validates credentials
 against SimpleShop, persists them locally, and updates the running MCP server.
 
 Requirements on the host machine:
@@ -93,6 +94,9 @@ settlement/accounting documents used for payment reconciliation. Pass
 Paid-date search uses `paid_from` and `paid_to`, which map to SimpleShop's
 `date_paid` filter expression; pass the same date to both fields for an exact
 paid day.
+Document results include normalized `payment_instructions` for intended
+receiving-account details and document paid state. They do not include matched
+bank transaction evidence.
 
 See [TOOLS.md](TOOLS.md) for full schemas, examples, cursor behavior, and
 privacy controls. The design rationale is in [DESIGN.md](DESIGN.md).
@@ -111,6 +115,9 @@ Raw fields are guarded:
 - `include_raw_csv` requires `include_customer_pii: true`.
 - `simpleshop_get_product_sales` supports `max_sales_rows`, `total_rows`,
   `returned_rows`, and `truncated` for bounded exports.
+- Public money values are returned as fixed two-decimal strings. When payment
+  instruction account fields are present, they are normalized under
+  `payment_instructions`.
 
 ## Requirements
 

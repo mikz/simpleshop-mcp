@@ -56,7 +56,7 @@ cursor filter hash.
 Collect SimpleShop credentials through one login tool. `mode` accepts `auto`,
 `direct`, `prefab`, or `web`. `auto` uses Prefab when the MCP client advertises
 Apps UI support, otherwise it returns a localhost web-login URL. `direct` accepts
-credentials in the tool arguments:
+`email` and `api_key` credentials in the tool call:
 
 - `email`: SimpleShop account email, used as the HTTP Basic username
 - `api_key`: API key from SimpleShop account settings
@@ -187,15 +187,21 @@ there is no exact-date `paid_at` query field. For an exact day, pass the same
 date to both fields.
 
 The response includes document metadata, `variable_symbol`, `currency`, `total`,
-`total_without_vat`, redacted customer presence flags, line items, product IDs
-found in line item metadata, optional PDF resource URIs, and control totals for
-search mode. These names mirror SimpleShop's document-level fields. For payment
-reconciliation, match Fio incoming transactions by `variable_symbol`, `currency`,
-and `total`. If you explicitly request orders too, use `document_type` and
-`raw_ids.id_parent` to distinguish orders from the resulting accounting
-documents. Set `include_customer_pii: true` to return full customer
-name/contact/address fields. `include_raw` also requires `include_customer_pii:
-true` because raw SimpleShop document payloads contain customer data.
+`total_without_vat`, normalized `payment_instructions`, redacted customer
+presence flags, line items, product IDs found in line item metadata, optional PDF
+resource URIs, and control totals for search mode. Money values are fixed
+two-decimal strings, for example `"1206.64"`.
+
+`payment_instructions` uses Fio-compatible field names for intended receiving
+account details: `bank_account`, `iban`, `bic`, `variable_symbol`,
+`constant_symbol`, `specific_symbol`, `amount`, `currency`, and
+`payment_method_id`. SimpleShop exposes intended receiving-account instructions
+and document paid state, not matched bank transaction evidence. If you
+explicitly request orders too, use `document_type` and `parent_id` to distinguish
+orders from the resulting accounting documents. Set `include_customer_pii: true`
+to return full customer name/contact/address fields. `include_raw` also requires
+`include_customer_pii: true` because raw SimpleShop document payloads contain
+customer data.
 
 ## `simpleshop_download_documents`
 

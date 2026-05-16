@@ -100,9 +100,7 @@ Response shape:
       "id": 12038161,
       "number": "20260019",
       "document_type": "invoice",
-      "document_type_code": 1,
-      "flags": 2,
-      "decoded_flags": ["paid"],
+      "parent_id": null,
       "states": {
         "paid": true,
         "canceled": false,
@@ -115,11 +113,9 @@ Response shape:
         "taxable_supply": "2026-04-26",
         "paid": "2026-04-26"
       },
-      "amounts": {
-        "currency": "CZK",
-        "total": "1369.00",
-        "total_without_vat": "1369.00"
-      },
+      "currency": "CZK",
+      "total": "1369.00",
+      "total_without_vat": "1369.00",
       "customer": {
         "redacted": true,
         "country_code": "CZ",
@@ -354,8 +350,7 @@ Response shape:
             "total": "1369.00",
             "currency": "CZK",
             "payment_method": "Fio CZK",
-            "coupon": null,
-            "invoice_number": "20260019"
+            "coupon": null
           },
           "custom_fields": {}
         }
@@ -392,7 +387,8 @@ to understand account-specific number series, payment methods, or tags.
 ## Semantics To Preserve
 
 - `document_type` is an enum, not a bitmask.
-- `flags` are composable bitmask states.
+- `states` are the public document state surface; raw SimpleShop flag bitmasks
+  stay internal to filtering and normalization.
 - `find` tools use opaque cursors even when SimpleShop uses `rows_offset`.
 - Search cursors contain offset, limit, sort, and a hash of the explicit filter
   fields. The next request must repeat the same filters; the server rejects

@@ -78,6 +78,18 @@ class VatBreakdown(BaseModel):
     total: Decimal | None = None
 
 
+class PaymentInstructions(BaseModel):
+    bank_account: str | None = None
+    iban: str | None = None
+    bic: str | None = None
+    variable_symbol: str | None = None
+    constant_symbol: str | None = None
+    specific_symbol: str | None = None
+    amount: str | None = None
+    currency: str | None = None
+    payment_method_id: int | str | None = None
+
+
 class LineItem(BaseModel):
     text: str | None = None
     quantity: Decimal | None = None
@@ -94,17 +106,15 @@ class LineItem(BaseModel):
 class AccountingDocument(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
-    source_system: str = "simpleshop"
-    source_id: int
-    source_number: str | None = None
-    source_urls: SourceUrls = Field(default_factory=SourceUrls)
-    source_key: str
-
+    id: int
+    number: str | None = None
+    urls: SourceUrls = Field(default_factory=SourceUrls)
     document_type: int | None = None
     document_type_label: str = "unknown"
     flags: int = 0
     variable_symbol: str | None = None
     currency: str | None = None
+    payment_instructions: PaymentInstructions = Field(default_factory=PaymentInstructions)
 
     date_created: str | None = None
     date_due: str | None = None
@@ -147,18 +157,6 @@ class LedgerExport(BaseModel):
     filters: dict[str, Any]
 
 
-class DocumentLinks(BaseModel):
-    source_id: int
-    source_number: str | None = None
-    urls: SourceUrls
-
-
-class ReferenceData(BaseModel):
-    payment_methods: list[dict[str, Any]]
-    number_series: list[dict[str, Any]]
-    tags: list[dict[str, Any]]
-
-
 class RawProductVariant(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -191,36 +189,3 @@ class ApiHealth(BaseModel):
     method: str | None = None
     message: str | None = None
     date: str | None = None
-
-
-class BuyerRecord(BaseModel):
-    invoice_id: str | None = None
-    invoice_number: str | None = None
-    order_id: str | None = None
-    variable_symbol: str | None = None
-    date_created: str | None = None
-    date_paid: str | None = None
-    customer_name: str | None = None
-    customer_firstname: str | None = None
-    customer_lastname: str | None = None
-    company_id: str | None = None
-    vat_id: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    street: str | None = None
-    city: str | None = None
-    postal_code: str | None = None
-    country_code: str | None = None
-    currency: str | None = None
-    total: str | None = None
-    product_name: str | None = None
-    extra: dict[str, str] = Field(default_factory=dict)
-
-
-class BuyerExport(BaseModel):
-    product_id: int
-    strict: str
-    rows: list[BuyerRecord]
-    columns: list[str] = Field(default_factory=list)
-    raw_rows: list[dict[str, str]] = Field(default_factory=list)
-    raw_csv: str | None = None

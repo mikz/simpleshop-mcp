@@ -17,3 +17,11 @@ run = "uv run --locked ruff check ."
 [tasks.mcp]
 description = "Run the SimpleShop MCP server over stdio with autoreload"
 run = "uv run --locked fastmcp run src/server.py --reload --reload-dir src --no-banner"
+
+[tasks.mcp-reload]
+description = "Run the SimpleShop MCP server over stdio with autoreload"
+run = "uv run --locked fastmcp run src/server.py:mcp --transport stdio --reload --reload-dir src --no-banner"
+
+[tasks.mcp-inspect]
+description = "Inspect the SimpleShop MCP server"
+run = "uv run --locked fastmcp inspect src/server.py:mcp --format mcp"

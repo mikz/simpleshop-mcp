@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -193,7 +194,13 @@ class SimpleShopClient:
 
 
 def _clean_params(params: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in params.items() if value is not None}
+    return {key: _param_value(value) for key, value in params.items() if value is not None}
+
+
+def _param_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
 
 
 def _expect_list(payload: Any, label: str) -> list[dict[str, Any]]:

@@ -9,6 +9,7 @@ from models import (
     Customer,
     InvoiceFlag,
     LineItem,
+    PaymentInstructions,
     SourceUrls,
     VatBreakdown,
 )
@@ -21,7 +22,7 @@ def has_flag(flags: int | str | None, flag: InvoiceFlag) -> bool:
 
 
 def normalize_invoice(invoice: dict[str, Any]) -> AccountingDocument:
-    source_id = _int(invoice.get("id"))
+    document_id = _int(invoice.get("id"))
     flags = _int(invoice.get("flags"))
     document_type = _optional_int(invoice.get("type"))
     customer = Customer(
@@ -39,10 +40,9 @@ def normalize_invoice(invoice: dict[str, Any]) -> AccountingDocument:
         country_code=_blank_to_none(invoice.get("customer_country_code")),
     )
     document = AccountingDocument(
-        source_id=source_id,
-        source_number=_blank_to_none(invoice.get("number")),
-        source_key=f"simpleshop:{source_id}",
-        source_urls=SourceUrls(
+        id=document_id,
+        number=_blank_to_none(invoice.get("number")),
+        urls=SourceUrls(
             public_webpage=_blank_to_none(invoice.get("url_public_webpage")),
             online_payment=_blank_to_none(invoice.get("url_online_payment")),
             download_pdf=_blank_to_none(invoice.get("url_download_pdf")),
@@ -55,6 +55,7 @@ def normalize_invoice(invoice: dict[str, Any]) -> AccountingDocument:
         flags=flags,
         variable_symbol=_blank_to_none(invoice.get("VS")),
         currency=_blank_to_none(invoice.get("currency")),
+        payment_instructions=_payment_instructions(invoice),
         date_created=_date_or_none(invoice.get("date_created")),
         date_due=_date_or_none(invoice.get("date_due")),
         date_taxable_supply=_date_or_none(invoice.get("date_taxable_supply")),
@@ -84,6 +85,21 @@ def normalize_invoice(invoice: dict[str, Any]) -> AccountingDocument:
         },
     )
     return document
+
+
+def _payment_instructions(invoice: dict[str, Any]) -> PaymentInstructions:
+    variable_symbol = _blank_to_none(invoice.get("VS"))
+    return PaymentInstructions(
+        bank_account=_bank_account(invoice),
+        iban=_uppercase_compact(_first_present(invoice, "iban", "IBAN")),
+        bic=_uppercase_compact(_first_present(invoice, "bic", "BIC", "swift", "SWIFT")),
+        variable_symbol=variable_symbol,
+        constant_symbol=_blank_to_none(_first_present(invoice, "KS", "constant_symbol")),
+        specific_symbol=_blank_to_none(_first_present(invoice, "SS", "specific_symbol")),
+        amount=_format_money(_decimal_or_none(invoice.get("total"))),
+        currency=_blank_to_none(invoice.get("currency")),
+        payment_method_id=invoice.get("id_payment_method"),
+    )
 
 
 def decoded_flags(flags: int | str | None) -> list[str]:
@@ -139,6 +155,53 @@ def _decimal_or_none(value: Any) -> Decimal | None:
         return Decimal(str(value).replace(",", "."))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _format_money(value: Decimal | None) -> str | None:
+    if value is None:
+        return None
+    return str(value.quantize(Decimal("0.01")))
+
+
+def _bank_account(invoice: dict[str, Any]) -> str | None:
+    combined = _compact(_first_present(invoice, "bank_account", "bankAccount"))
+    if combined and "/" in combined:
+        account, bank_code = combined.split("/", 1)
+        if account and bank_code:
+            return f"{account}/{bank_code}"
+    account = _compact(
+        _first_present(
+            invoice,
+            "account_number",
+            "accountNumber",
+            "bank_account_number",
+            "bankAccountNumber",
+        )
+    )
+    bank_code = _compact(_first_present(invoice, "bank_code", "bankCode", "bank_id", "bankId"))
+    if account and bank_code:
+        return f"{account}/{bank_code}"
+    return None
+
+
+def _uppercase_compact(value: Any) -> str | None:
+    compact = _compact(value)
+    return compact.upper() if compact else None
+
+
+def _compact(value: Any) -> str | None:
+    value = _blank_to_none(value)
+    if value is None:
+        return None
+    return "".join(str(value).split()) or None
+
+
+def _first_present(invoice: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = invoice.get(key)
+        if _blank_to_none(value) is not None:
+            return value
+    return None
 
 
 def _optional_int(value: Any) -> int | None:
