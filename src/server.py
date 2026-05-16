@@ -402,6 +402,7 @@ class FoundDocument(BaseModel):
     id: int
     ok: bool = True
     number: str | None = None
+    variable_symbol: str | None = None
     document_type: str | None = None
     document_type_code: int | None = None
     flags: int | None = None
@@ -428,6 +429,7 @@ class FoundDocument(BaseModel):
         return cls(
             id=record.source_id,
             number=record.source_number,
+            variable_symbol=record.variable_symbol,
             document_type=record.document_type_label,
             document_type_code=record.document_type,
             flags=record.flags,

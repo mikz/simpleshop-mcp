@@ -270,6 +270,7 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
 
     assert _product_ids_from_record(record) == [145235]
     assert payload.ok is True
+    assert payload.variable_symbol == "72600024"
     assert payload.product_ids == [145235]
     assert payload.pdf_resources[0].resource_uri.endswith("/with_stamp")
     assert payload.customer["redacted"] is True

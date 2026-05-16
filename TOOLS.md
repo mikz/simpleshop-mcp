@@ -139,11 +139,13 @@ oss
 
 Use `exact_flags`, `has_any_flags`, `has_all_flags`, and `without_flags`.
 
-The response includes document metadata, redacted customer presence flags, line
-items, product IDs found in line item metadata, PDF resource URIs, and control
-totals for search mode. Set `include_customer_pii: true` to return full customer
-name/contact/address fields. `include_raw` also requires `include_customer_pii:
-true` because raw SimpleShop document payloads contain customer data.
+The response includes document metadata, `variable_symbol`, redacted customer
+presence flags, line items, product IDs found in line item metadata, PDF resource
+URIs, and control totals for search mode. Use `variable_symbol` with Fio's
+`variable_symbol` transaction filter when reconciling arrived bank payments. Set
+`include_customer_pii: true` to return full customer name/contact/address fields.
+`include_raw` also requires `include_customer_pii: true` because raw SimpleShop
+document payloads contain customer data.
 
 ## `simpleshop_download_documents`
 

@@ -10,6 +10,7 @@ def test_generic_accounting_document_has_downstream_required_fields() -> None:
     assert payload["source_id"]
     assert payload["source_key"]
     assert payload["source_number"]
+    assert payload["variable_symbol"]
     assert payload["document_type"]
     assert payload["document_type_label"]
     assert payload["date_created"]

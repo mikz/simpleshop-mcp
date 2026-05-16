@@ -19,6 +19,7 @@ def test_normalize_invoice_preserves_accounting_fields() -> None:
     assert document.source_system == "simpleshop"
     assert document.source_key == "simpleshop:12149248"
     assert document.source_number == "FA260024"
+    assert document.variable_symbol == "72600024"
     assert document.document_type_label == "invoice"
     assert document.paid is True
     assert document.decoded_flags == ["has_vat", "paid"]

@@ -90,6 +90,7 @@ def decoded_flags(flags: int | str | None) -> list[str]:
     value = _int(flags)
     return [flag.name.lower() for flag in InvoiceFlag if value & int(flag)]
 
+
 def _normalize_item(item: dict[str, Any]) -> LineItem:
     return LineItem(
         text=_blank_to_none(item.get("text")),
