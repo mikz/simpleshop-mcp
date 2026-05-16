@@ -110,6 +110,8 @@ invoices.
     "mode": "search",
     "created_from": "2026-05-01",
     "created_to": "2026-05-31",
+    "paid_from": "2026-05-01",
+    "paid_to": "2026-05-31",
     "document_types": [
       "invoice",
       "advance_invoice",
@@ -178,6 +180,11 @@ oss
 ```
 
 Use `exact_flags`, `has_any_flags`, `has_all_flags`, and `without_flags`.
+
+Paid-date search uses `paid_from` and `paid_to`. The server translates these to
+SimpleShop's documented `date_paid` filter expression with `GTEQ` and `LTEQ`;
+there is no exact-date `paid_at` query field. For an exact day, pass the same
+date to both fields.
 
 The response includes document metadata, `variable_symbol`, `currency`, `total`,
 `total_without_vat`, redacted customer presence flags, line items, product IDs

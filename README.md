@@ -90,6 +90,9 @@ robust when an agent carries over defaults from schema discovery.
 For `simpleshop_find_documents`, omitting `document_types` defaults to
 settlement/accounting documents used for payment reconciliation. Pass
 `document_types: ["order"]` explicitly for order workflows.
+Paid-date search uses `paid_from` and `paid_to`, which map to SimpleShop's
+`date_paid` filter expression; pass the same date to both fields for an exact
+paid day.
 
 See [TOOLS.md](TOOLS.md) for full schemas, examples, cursor behavior, and
 privacy controls. The design rationale is in [DESIGN.md](DESIGN.md).

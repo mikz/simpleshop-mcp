@@ -475,6 +475,8 @@ class FindDocumentsQuery(BaseModel):
                     "mode": "search",
                     "created_from": "2026-05-01",
                     "created_to": "2026-05-31",
+                    "paid_from": "2026-05-01",
+                    "paid_to": "2026-05-31",
                     "document_types": [
                         "invoice",
                         "advance_invoice",
@@ -511,7 +513,8 @@ class FindDocumentsQuery(BaseModel):
     created: date | None = None
     due: date | None = None
     taxable_supply: date | None = None
-    paid_at: date | None = None
+    paid_from: date | None = None
+    paid_to: date | None = None
     document_types: list[DocumentTypeFilter] = Field(
         default=DEFAULT_RECONCILIATION_DOCUMENT_TYPES,
         description=(
@@ -561,6 +564,8 @@ class FindDocumentsQuery(BaseModel):
     def validate_mode(self) -> FindDocumentsQuery:
         if self.include_raw and not self.include_customer_pii:
             raise ValueError("include_raw requires include_customer_pii=true")
+        if self.paid_from and self.paid_to and self.paid_to < self.paid_from:
+            raise ValueError("paid_to must be on or after paid_from")
         if self.mode == "by_ids":
             if not self.ids:
                 raise ValueError("ids are required when mode is by_ids")
@@ -576,7 +581,8 @@ class FindDocumentsQuery(BaseModel):
                 "created": _api_date(self.created),
                 "due": _api_date(self.due),
                 "taxable_supply": _api_date(self.taxable_supply),
-                "paid_at": _api_date(self.paid_at),
+                "paid_from": _api_date(self.paid_from),
+                "paid_to": _api_date(self.paid_to),
                 "document_types": sorted(
                     self.document_types or DEFAULT_RECONCILIATION_DOCUMENT_TYPES
                 ),
@@ -954,6 +960,8 @@ class MetadataEntry(BaseModel):
 
 
 class MetadataResult(BaseModel):
+    source_documents: list[str] = Field(default_factory=list)
+    comparison_fields: dict[str, Any] = Field(default_factory=dict)
     payment_methods: list[dict[str, Any]] = Field(default_factory=list)
     number_series: list[dict[str, Any]] = Field(default_factory=list)
     tags: list[dict[str, Any]] = Field(default_factory=list)
@@ -1174,6 +1182,15 @@ async def simpleshop_get_metadata(
     """Return SimpleShop metadata useful for filtering and accounting classification."""
     client = _client_from_context(ctx)
     return MetadataResult(
+        source_documents=[
+            "https://simpleshopcz.docs.apiary.io/",
+            "https://jsapi.apiary.io/apis/simpleshopcz.apib",
+        ],
+        comparison_fields={
+            "document_date_filters": ["created_from", "created_to", "paid_from", "paid_to"],
+            "payment_fields": ["variable_symbol", "currency", "total", "total_without_vat"],
+            "paid_date_source_field": "date_paid",
+        },
         payment_methods=await client.payment_methods() if include_payment_methods else [],
         number_series=await client.number_series() if include_number_series else [],
         tags=await client.tags() if include_tags else [],
@@ -1286,7 +1303,6 @@ def _document_search_params(
         "date_created": _api_date(query.created),
         "date_due": _api_date(query.due),
         "date_taxable_supply": _api_date(query.taxable_supply),
-        "date_paid": _api_date(query.paid_at),
         "id_customer": query.customer_id,
         "id_number_series": query.number_series_id,
         "id_center": query.center_id,
@@ -1302,6 +1318,8 @@ def _document_search_params(
         "days_due": query.days_due,
         "filter": _build_filter_expression(
             api_filter=query.api_filter,
+            paid_from=query.paid_from,
+            paid_to=query.paid_to,
             has_any_flags=query.has_any_flags,
             has_all_flags=query.has_all_flags,
         ),
@@ -1566,12 +1584,18 @@ def _flag_mask(flags: list[DocumentFlag] | None) -> int | None:
 def _build_filter_expression(
     *,
     api_filter: str | None,
-    has_any_flags: list[DocumentFlag] | None,
-    has_all_flags: list[DocumentFlag] | None,
+    paid_from: date | None = None,
+    paid_to: date | None = None,
+    has_any_flags: list[DocumentFlag] | None = None,
+    has_all_flags: list[DocumentFlag] | None = None,
 ) -> str | None:
     clauses = []
     if api_filter:
         clauses.append(api_filter)
+    if paid_from:
+        clauses.append(f"date_paid~GTEQ~{_api_date(paid_from)}")
+    if paid_to:
+        clauses.append(f"date_paid~LTEQ~{_api_date(paid_to)}")
     any_mask = _flag_mask(has_any_flags)
     if any_mask is not None:
         clauses.append(f"flags~CTBIT~{any_mask}")

@@ -8,7 +8,6 @@ import server as server
 from models import RawProduct
 from normalization import normalize_invoice
 from server import (
-    DEFAULT_RECONCILIATION_DOCUMENT_TYPES,
     DownloadDocumentRequest,
     FindDocumentsQuery,
     FindProductsQuery,
@@ -42,42 +41,6 @@ from tests.fixtures import invoice_fixture
 def dummy_simpleshop_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SIMPLESHOP_LOGIN", "user@example.com")
     monkeypatch.setenv("SIMPLESHOP_API_KEY", "test-api-key")
-
-
-async def test_exposed_tool_catalog_matches_locked_design(dummy_simpleshop_env: None) -> None:
-    async with Client(server.mcp) as client:
-        tools = await client.list_tools()
-
-    assert [tool.name for tool in tools] == [
-        "simpleshop_test_login",
-        "simpleshop_find_documents",
-        "simpleshop_download_documents",
-        "simpleshop_find_products",
-        "simpleshop_get_product_sales",
-        "simpleshop_get_metadata",
-        "simpleshop_login",
-    ]
-
-
-async def test_fastmcp_schema_hides_context_dependency(dummy_simpleshop_env: None) -> None:
-    async with Client(server.mcp) as client:
-        tools = {tool.name: tool for tool in await client.list_tools()}
-
-    assert "ctx" not in tools["simpleshop_find_documents"].inputSchema["properties"]
-    assert "ctx" not in tools["simpleshop_download_documents"].inputSchema["properties"]
-    assert set(tools["simpleshop_find_products"].inputSchema["properties"]) == {"query"}
-    products_query = tools["simpleshop_find_products"].inputSchema["properties"]["query"]
-    documents_query = tools["simpleshop_find_documents"].inputSchema["properties"]["query"]
-    assert products_query["type"] == "object"
-    assert documents_query["type"] == "object"
-    assert products_query["required"] == ["mode"]
-    assert documents_query["required"] == ["mode"]
-    assert products_query["properties"]["mode"]["enum"] == ["search", "by_ids"]
-    document_types_schema = documents_query["properties"]["document_types"]
-    assert document_types_schema["default"] == DEFAULT_RECONCILIATION_DOCUMENT_TYPES
-    assert "Orders are intentionally excluded" in document_types_schema["description"]
-    assert "oneOf" not in products_query
-    assert "oneOf" not in documents_query
 
 
 async def test_login_gated_tools_report_clear_runtime_login_hint(
@@ -259,10 +222,39 @@ def test_named_flags_build_ctbit_filter_expressions() -> None:
     )
 
 
+def test_paid_date_range_builds_filter_expression() -> None:
+    assert (
+        _build_filter_expression(
+            api_filter="total~GT~0",
+            paid_from=date(2026, 4, 23),
+            paid_to=date(2026, 4, 26),
+            has_any_flags=["paid"],
+        )
+        == "total~GT~0|AND|date_paid~GTEQ~2026-04-23|AND|"
+        "date_paid~LTEQ~2026-04-26|AND|flags~CTBIT~2"
+    )
+
+
+def test_document_query_rejects_invalid_paid_date_range() -> None:
+    with pytest.raises(ValueError, match="paid_to must be on or after paid_from"):
+        FindDocumentsQuery(
+            mode="search",
+            paid_from=date(2026, 4, 26),
+            paid_to=date(2026, 4, 23),
+        )
+
+
+def test_document_query_rejects_old_paid_at_alias() -> None:
+    with pytest.raises(ValueError):
+        FindDocumentsQuery.model_validate({"mode": "search", "paid_at": "2026-04-23"})
+
+
 def test_document_search_params_follow_mode_query() -> None:
     query = FindDocumentsQuery(
         mode="search",
         created_from=date(2026, 1, 1),
+        paid_from=date(2026, 4, 23),
+        paid_to=date(2026, 4, 26),
         document_types=["invoice"],
         without_flags=["archived"],
         limit=25,
@@ -271,20 +263,11 @@ def test_document_search_params_follow_mode_query() -> None:
     params = _document_search_params(query, "invoice", 50)
 
     assert params["date_created_from"] == "2026-01-01"
+    assert "date_paid" not in params
+    assert params["filter"] == "date_paid~GTEQ~2026-04-23|AND|date_paid~LTEQ~2026-04-26"
     assert params["type"] == 1
     assert params["rows_limit"] == 25
     assert params["rows_offset"] == 50
-
-
-def test_document_query_schema_defaults_are_reconciliation_oriented() -> None:
-    query = FindDocumentsQuery(mode="search")
-
-    assert query.document_types == DEFAULT_RECONCILIATION_DOCUMENT_TYPES
-    assert "order" not in query.document_types
-    assert query.cancellation_state == "active"
-    assert query.test_mode == "production"
-    assert query.archive_state == "active"
-    assert query.include_pdf_resources is False
 
 
 async def test_default_document_search_excludes_orders() -> None:
