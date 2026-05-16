@@ -6,6 +6,7 @@ SimpleShop data.
 The exposed hard-cut surface is:
 
 ```text
+simpleshop_login
 simpleshop_test_login
 simpleshop_find_documents
 simpleshop_download_documents
@@ -50,11 +51,27 @@ Response-shaping flags such as `include_pdf_resources`, `include_raw`,
 `include_customer_pii`, and `include_variants` are deliberately excluded from the
 cursor filter hash.
 
+## `simpleshop_login`
+
+Collect SimpleShop credentials through an inline FastMCP Apps form, validate
+them against `GET test/`, persist them locally, and update the running MCP
+server. The form asks for:
+
+- `email`: SimpleShop account email, used as the HTTP Basic username
+- `api_key`: API key from SimpleShop account settings
+
+Successful login stores credentials in the OS keyring when available and in
+`${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/credentials.env` with mode
+`0600`.
+
+Clients that do not render the inline form can pre-seed credentials with
+`SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY`, the OS keyring service
+`simpleshop-mcp`, or the credentials file.
+
 ## `simpleshop_test_login`
 
-Verify that the configured `SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY` are
-accepted by SimpleShop. Hits the `GET test/` endpoint with no side effects.
-Takes no arguments.
+Verify that current credentials are configured and accepted by SimpleShop. Hits
+the `GET test/` endpoint with no side effects. Takes no arguments.
 
 ```json
 { "ok": true }
@@ -69,8 +86,17 @@ When credentials are rejected or the API is unreachable:
 }
 ```
 
-Error codes: `unauthorized` (401), `forbidden` (403), `simpleshop_error` (other
-API failures), `network_error` (DNS/connect/timeout).
+When no credentials are available:
+
+```json
+{
+  "ok": false,
+  "error": { "code": "not_logged_in", "message": "No SimpleShop credentials configured. Call simpleshop_login first." }
+}
+```
+
+Error codes: `not_logged_in`, `unauthorized` (401), `forbidden` (403),
+`simpleshop_error` (other API failures), `network_error` (DNS/connect/timeout).
 
 ## `simpleshop_find_documents`
 

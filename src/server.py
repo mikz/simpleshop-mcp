@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import functools
 import hashlib
 import json
 import re
@@ -12,27 +13,120 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.apps import UI_EXTENSION_ID
+from fastmcp.apps.form import FormInput
+from fastmcp.exceptions import ToolError
 from fastmcp.server.context import Context
 from fastmcp.server.lifespan import lifespan
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from client import SimpleShopClient, SimpleShopError
+from client import NotAuthenticatedError, SimpleShopClient, SimpleShopError
 from models import DOCUMENT_TYPE_LABELS, AccountingDocument, RawProduct
 from normalization import normalize_invoice
 from reports import make_ledger_export
-from settings import load_settings
+from settings import load_settings, store_credentials
+
+# Module-level handle so the sync FormInput.on_submit callback can swap
+# credentials on the running client without going through the async context.
+_LIVE_CLIENT: SimpleShopClient | None = None
 
 
 @lifespan
 async def app_lifespan(_server: FastMCP):
+    global _LIVE_CLIENT
     client = SimpleShopClient(load_settings())
+    _LIVE_CLIENT = client
     try:
         yield {"simpleshop_client": client}
     finally:
+        _LIVE_CLIENT = None
         await client.aclose()
 
 
 mcp = FastMCP("SimpleShop Accounting", lifespan=app_lifespan)
+
+
+class SimpleShopLogin(BaseModel):
+    """SimpleShop credentials. Stored locally — never sent anywhere except SimpleShop's API."""
+
+    email: str = Field(description="SimpleShop account email (used as HTTP Basic username)")
+    api_key: str = Field(description="API key from SimpleShop account settings")
+
+
+def _login_on_submit(login: SimpleShopLogin) -> str:
+    """Validate creds against SimpleShop, persist, and swap in-process credentials.
+
+    Runs synchronously (FormInput.on_submit contract). Uses sync httpx for the
+    validation call so we don't need to bounce back into the asyncio loop.
+    """
+    base_url = "https://api.simpleshop.cz/2.0/"
+    if _LIVE_CLIENT is not None:
+        base_url = _LIVE_CLIENT.base_url
+    try:
+        response = httpx.get(
+            f"{base_url}test/",
+            auth=httpx.BasicAuth(login.email, login.api_key),
+            timeout=10.0,
+        )
+    except httpx.RequestError as exc:
+        return f"Network error contacting SimpleShop: {exc}"
+    if response.status_code == 401:
+        return "SimpleShop rejected the credentials (HTTP 401). Double-check the email and API key."
+    if response.status_code >= 400:
+        body = response.text[:200]
+        return f"SimpleShop returned HTTP {response.status_code} during validation: {body}"
+
+    store_credentials(login.email, login.api_key)
+    if _LIVE_CLIENT is not None:
+        _LIVE_CLIENT.set_credentials_sync(login.email, login.api_key)
+    return "Logged in to SimpleShop. The accounting tools are ready to use."
+
+
+mcp.add_provider(
+    FormInput(
+        model=SimpleShopLogin,
+        tool_name="simpleshop_login",
+        title="Sign in to SimpleShop",
+        submit_text="Sign in",
+        on_submit=_login_on_submit,
+    )
+)
+
+
+def _requires_login(fn):
+    """Gate a tool on authenticated state.
+
+    Tools wrapped with this raise a clear ``ToolError`` directing the user to
+    call ``simpleshop_login`` first when the client has no credentials.
+    """
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        ctx = kwargs.get("ctx")
+        if ctx is None:
+            for arg in args:
+                if isinstance(arg, Context):
+                    ctx = arg
+                    break
+        if ctx is None:
+            raise RuntimeError("_requires_login: Context missing from tool call")
+        client: SimpleShopClient = ctx.lifespan_context["simpleshop_client"]
+        if not client.is_authenticated():
+            hint = (
+                "Not signed in to SimpleShop. Call the `simpleshop_login` tool first — "
+                "the user will be prompted with a form to enter their email and API key."
+            )
+            if not ctx.client_supports_extension(UI_EXTENSION_ID):
+                hint += (
+                    " (Note: this client doesn't render the inline form UI; "
+                    "the user can instead set SIMPLESHOP_LOGIN / SIMPLESHOP_API_KEY "
+                    "via OS keyring or "
+                    "$XDG_CONFIG_HOME/simpleshop-mcp/credentials.env.)"
+                )
+            raise ToolError(hint)
+        return await fn(*args, **kwargs)
+
+    return wrapper
 
 DocumentTypeFilter = Literal[
     "invoice",
@@ -676,14 +770,28 @@ class SearchCursor(BaseModel):
 
 @mcp.tool
 async def simpleshop_test_login(ctx: Context) -> TestLoginResult:
-    """Verify that the configured SimpleShop credentials are accepted by the API."""
-    return await _run_test_login(_client_from_context(ctx))
+    """Check whether SimpleShop credentials are configured and accepted by the API."""
+    client = _client_from_context(ctx)
+    if not client.is_authenticated():
+        return TestLoginResult(
+            ok=False,
+            error=ErrorInfo(
+                code="not_logged_in",
+                message="No SimpleShop credentials configured. Call simpleshop_login first.",
+            ),
+        )
+    return await _run_test_login(client)
 
 
 async def _run_test_login(client: SimpleShopClient) -> TestLoginResult:
     try:
         await client.health_check()
         return TestLoginResult(ok=True)
+    except NotAuthenticatedError as exc:
+        return TestLoginResult(
+            ok=False,
+            error=ErrorInfo(code="not_logged_in", message=str(exc)),
+        )
     except SimpleShopError as exc:
         return TestLoginResult(ok=False, error=_login_error_info(exc))
     except httpx.RequestError as exc:
@@ -702,6 +810,7 @@ def _login_error_info(exc: SimpleShopError) -> ErrorInfo:
 
 
 @mcp.tool
+@_requires_login
 async def simpleshop_find_documents(
     query: Annotated[
         FindDocumentsQuery,
@@ -722,6 +831,7 @@ async def simpleshop_find_documents(
 
 
 @mcp.tool
+@_requires_login
 async def simpleshop_download_documents(
     ctx: Context,
     documents: list[DownloadDocumentRequest] = Field(min_length=1, max_length=100),
@@ -765,6 +875,7 @@ async def simpleshop_document_pdf(
 
 
 @mcp.tool
+@_requires_login
 async def simpleshop_find_products(
     query: Annotated[
         FindProductsQuery,
@@ -785,6 +896,7 @@ async def simpleshop_find_products(
 
 
 @mcp.tool
+@_requires_login
 async def simpleshop_get_product_sales(
     ctx: Context,
     product_ids: list[int] = Field(min_length=1, max_length=100),
@@ -840,6 +952,7 @@ async def simpleshop_get_product_sales(
 
 
 @mcp.tool
+@_requires_login
 async def simpleshop_get_metadata(
     ctx: Context,
     include_payment_methods: bool = True,

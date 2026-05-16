@@ -1,35 +1,16 @@
 {
   "name": "simpleshop-mcp",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Read-only SimpleShop MCP server for accounting agents",
   "author": { "name": "Michal Cichra" },
   "homepage": "https://github.com/mikz/simpleshop-mcp",
   "license": "MIT",
   "keywords": ["simpleshop", "accounting", "czech", "invoicing", "mcp"],
-  "userConfig": {
-    "login": {
-      "type": "string",
-      "title": "SimpleShop login",
-      "description": "Your SimpleShop account email used for API auth",
-      "required": true
-    },
-    "api_key": {
-      "type": "string",
-      "title": "SimpleShop API key",
-      "description": "API key from SimpleShop account settings",
-      "sensitive": true,
-      "required": true
-    }
-  },
   "mcpServers": {
     "simpleshop": {
       "type": "stdio",
       "command": "uvx",
-      "args": ["--from", "${CLAUDE_PLUGIN_ROOT}", "simpleshop-mcp"],
-      "env": {
-        "SIMPLESHOP_LOGIN": "${user_config.login}",
-        "SIMPLESHOP_API_KEY": "${user_config.api_key}"
-      }
+      "args": ["--from", "${CLAUDE_PLUGIN_ROOT}", "simpleshop-mcp"]
     }
   }
 }
