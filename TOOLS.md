@@ -53,9 +53,10 @@ cursor filter hash.
 
 ## `simpleshop_login`
 
-Collect SimpleShop credentials through an inline FastMCP Apps form, validate
-them against `GET test/`, persist them locally, and update the running MCP
-server. The form asks for:
+Collect SimpleShop credentials through one login tool. `mode` accepts `auto`,
+`direct`, `prefab`, or `web`. `auto` uses Prefab when the MCP client advertises
+Apps UI support, otherwise it returns a localhost web-login URL. `direct` accepts
+credentials in the tool arguments:
 
 - `email`: SimpleShop account email, used as the HTTP Basic username
 - `api_key`: API key from SimpleShop account settings
@@ -65,8 +66,8 @@ Successful login stores credentials in a store scoped to the server process
 `${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/scopes/<scope-id>/credentials.env`
 with mode `0600`.
 
-Clients that do not render the inline form can pre-seed credentials with
-`SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY` or the cwd-scoped credential store.
+Clients can also pre-seed credentials with `SIMPLESHOP_LOGIN` /
+`SIMPLESHOP_API_KEY` or the cwd-scoped credential store.
 
 ## `simpleshop_test_login`
 

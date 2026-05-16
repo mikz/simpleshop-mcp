@@ -19,10 +19,10 @@ send, or mutate SimpleShop records.
 ```
 
 The server starts without credentials. To sign in, call the
-`simpleshop_login` MCP tool. Clients that support FastMCP Apps render an inline
-form for the SimpleShop account email and API key. The server validates those
-credentials against SimpleShop, persists them locally, and updates the running
-MCP server so the read-only accounting tools are ready immediately.
+`simpleshop_login` MCP tool. It supports `mode: "auto" | "direct" | "prefab" |
+"web"`: Apps-capable clients get an inline Prefab form, clients such as Codex can
+use direct arguments or a localhost web form. The server validates credentials
+against SimpleShop, persists them locally, and updates the running MCP server.
 
 Requirements on the host machine:
 
@@ -59,7 +59,8 @@ simpleshop_get_product_sales
 simpleshop_get_metadata
 ```
 
-`simpleshop_login` collects and validates credentials at runtime.
+`simpleshop_login` collects and validates credentials at runtime through direct
+arguments, Prefab UI, or a localhost web form.
 `simpleshop_test_login` takes no arguments and is the quickest way to confirm
 the current credentials work. It reports `not_logged_in` when none are available.
 
@@ -140,6 +141,7 @@ uv sync --locked
 ## Login And Configuration
 
 The preferred path is runtime login through the `simpleshop_login` MCP tool.
+Use `mode: "auto"` unless you need to force `direct`, `prefab`, or `web`.
 After successful validation, credentials are stored locally and loaded on future
 starts in this order:
 

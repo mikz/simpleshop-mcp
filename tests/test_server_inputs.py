@@ -8,6 +8,7 @@ import server as server
 from models import RawProduct
 from normalization import normalize_invoice
 from server import (
+    DEFAULT_RECONCILIATION_DOCUMENT_TYPES,
     DownloadDocumentRequest,
     FindDocumentsQuery,
     FindProductsQuery,
@@ -23,6 +24,7 @@ from server import (
     _document_search_params,
     _document_type_to_api,
     _encode_cursor,
+    _find_documents_by_search,
     _flag_mask,
     _matches_document_filters,
     _matches_product_filters,
@@ -71,6 +73,9 @@ async def test_fastmcp_schema_hides_context_dependency(dummy_simpleshop_env: Non
     assert products_query["required"] == ["mode"]
     assert documents_query["required"] == ["mode"]
     assert products_query["properties"]["mode"]["enum"] == ["search", "by_ids"]
+    document_types_schema = documents_query["properties"]["document_types"]
+    assert document_types_schema["default"] == DEFAULT_RECONCILIATION_DOCUMENT_TYPES
+    assert "Orders are intentionally excluded" in document_types_schema["description"]
     assert "oneOf" not in products_query
     assert "oneOf" not in documents_query
 
@@ -271,6 +276,66 @@ def test_document_search_params_follow_mode_query() -> None:
     assert params["rows_offset"] == 50
 
 
+def test_document_query_schema_defaults_are_reconciliation_oriented() -> None:
+    query = FindDocumentsQuery(mode="search")
+
+    assert query.document_types == DEFAULT_RECONCILIATION_DOCUMENT_TYPES
+    assert "order" not in query.document_types
+    assert query.cancellation_state == "active"
+    assert query.test_mode == "production"
+    assert query.archive_state == "active"
+    assert query.include_pdf_resources is False
+
+
+async def test_default_document_search_excludes_orders() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.requested_types: list[int | None] = []
+
+        async def search_invoices(self, params: dict[str, object]) -> list[dict[str, object]]:
+            self.requested_types.append(params["type"])
+            if params["type"] == 1:
+                return [invoice_fixture()]
+            if params["type"] == 512:
+                return [invoice_fixture(id=2, type=512, number="420260024")]
+            return []
+
+    fake_client = FakeClient()
+
+    result = await _find_documents_by_search(fake_client, FindDocumentsQuery(mode="search"))
+
+    assert 512 not in fake_client.requested_types
+    assert None not in fake_client.requested_types
+    assert result.documents[0].document_type == "invoice"
+
+
+async def test_explicit_order_search_returns_orders() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.requested_types: list[int | None] = []
+
+        async def search_invoices(self, params: dict[str, object]) -> list[dict[str, object]]:
+            self.requested_types.append(params["type"])
+            return [
+                invoice_fixture(
+                    id=2,
+                    type=512,
+                    number="420260024",
+                    id_parent=0,
+                )
+            ]
+
+    fake_client = FakeClient()
+
+    result = await _find_documents_by_search(
+        fake_client,
+        FindDocumentsQuery(mode="search", document_types=["order"]),
+    )
+
+    assert fake_client.requested_types == [512]
+    assert result.documents[0].document_type == "order"
+
+
 def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
     record = normalize_invoice(
         invoice_fixture(
@@ -296,6 +361,9 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
     assert _product_ids_from_record(record) == [145235]
     assert payload.ok is True
     assert payload.variable_symbol == "72600024"
+    assert payload.currency == "CZK"
+    assert payload.total == "1206.64"
+    assert payload.total_without_vat == "1049.25"
     assert payload.product_ids == [145235]
     assert payload.pdf_resources[0].resource_uri.endswith("/with_stamp")
     assert payload.customer["redacted"] is True

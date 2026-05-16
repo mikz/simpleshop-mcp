@@ -6,18 +6,26 @@ import functools
 import hashlib
 import json
 import re
+import secrets
+import threading
 import unicodedata
 from datetime import date
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from typing import Annotated, Any, Literal
+from urllib.parse import parse_qs
 
 import httpx
 from fastmcp import FastMCP
 from fastmcp.apps import UI_EXTENSION_ID
-from fastmcp.apps.form import FormInput
 from fastmcp.exceptions import ToolError
 from fastmcp.server.context import Context
 from fastmcp.server.lifespan import lifespan
+from prefab_ui.actions import Fetch, SetState, ShowToast
+from prefab_ui.actions.mcp import CallTool
+from prefab_ui.app import PrefabApp
+from prefab_ui.components import Button, Column, Form, Heading, Input, Muted, Text
+from prefab_ui.rx import Rx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from client import NotAuthenticatedError, SimpleShopClient, SimpleShopError
@@ -26,7 +34,7 @@ from normalization import normalize_invoice
 from reports import make_ledger_export
 from settings import load_settings, store_credentials
 
-# Module-level handle so the sync FormInput.on_submit callback can swap
+# Module-level handle so the sync login submit callback can swap
 # credentials on the running client without going through the async context.
 _LIVE_CLIENT: SimpleShopClient | None = None
 
@@ -44,6 +52,9 @@ async def app_lifespan(_server: FastMCP):
 
 
 mcp = FastMCP("SimpleShop Accounting", lifespan=app_lifespan)
+LoginMode = Literal["auto", "direct", "prefab", "web"]
+ResolvedLoginMode = Literal["direct", "prefab", "web"]
+_WEB_LOGIN_SERVERS: dict[str, ThreadingHTTPServer] = {}
 
 
 class SimpleShopLogin(BaseModel):
@@ -53,10 +64,20 @@ class SimpleShopLogin(BaseModel):
     api_key: str = Field(description="API key from SimpleShop account settings")
 
 
+class LoginResult(BaseModel):
+    ok: bool
+    mode: ResolvedLoginMode
+    status: Literal["logged_in", "needs_input", "unsupported", "error"]
+    message: str
+    url: str | None = None
+    transport: str | None = None
+    ui_supported: bool = False
+
+
 def _login_on_submit(login: SimpleShopLogin) -> str:
     """Validate creds against SimpleShop, persist, and swap in-process credentials.
 
-    Runs synchronously (FormInput.on_submit contract). Uses sync httpx for the
+    Runs synchronously so it can be shared by Prefab, web, and direct login. Uses sync httpx for the
     validation call so we don't need to bounce back into the asyncio loop.
     """
     base_url = "https://api.simpleshop.cz/2.0/"
@@ -82,15 +103,184 @@ def _login_on_submit(login: SimpleShopLogin) -> str:
     return "Logged in to SimpleShop. The accounting tools are ready to use."
 
 
-mcp.add_provider(
-    FormInput(
-        model=SimpleShopLogin,
-        tool_name="simpleshop_login",
-        title="Sign in to SimpleShop",
-        submit_text="Sign in",
-        on_submit=_login_on_submit,
+async def simpleshop_login(
+    ctx: Context,
+    mode: LoginMode = "auto",
+    credentials: Annotated[
+        SimpleShopLogin | None,
+        Field(
+            description=(
+                "Credentials for mode=direct. Omit for auto, prefab, or web. "
+                "Direct mode sends secrets through the MCP tool call."
+            )
+        ),
+    ] = None,
+) -> LoginResult | PrefabApp:
+    """Sign in to SimpleShop using auto, direct, Prefab UI, or localhost web login."""
+    selected = _resolve_login_mode(ctx, mode)
+    if selected == "prefab":
+        if not ctx.client_supports_extension(UI_EXTENSION_ID):
+            return _login_result(
+                ctx,
+                mode="prefab",
+                status="unsupported",
+                message="This MCP client does not advertise the Apps UI extension.",
+                ok=False,
+            )
+        return _simpleshop_login_prefab_app()
+    if selected == "web":
+        url = _start_simpleshop_web_login()
+        return _login_result(
+            ctx,
+            mode="web",
+            status="needs_input",
+            message=f"Open this local URL in a browser to sign in to SimpleShop: {url}",
+            ok=True,
+            url=url,
+        )
+    if credentials is None:
+        return _login_result(
+            ctx,
+            mode="direct",
+            status="error",
+            message="mode=direct requires credentials.email and credentials.api_key.",
+            ok=False,
+        )
+    return _login_result_from_submit(ctx, "direct", _login_on_submit(credentials))
+
+
+def _resolve_login_mode(ctx: Context, mode: LoginMode) -> ResolvedLoginMode:
+    if mode != "auto":
+        return mode
+    if ctx.client_supports_extension(UI_EXTENSION_ID):
+        return "prefab"
+    return "web"
+
+
+def _login_result(
+    ctx: Context,
+    *,
+    mode: ResolvedLoginMode,
+    status: Literal["logged_in", "needs_input", "unsupported", "error"],
+    message: str,
+    ok: bool,
+    url: str | None = None,
+) -> LoginResult:
+    return LoginResult(
+        ok=ok,
+        mode=mode,
+        status=status,
+        message=message,
+        url=url,
+        transport=ctx.transport,
+        ui_supported=ctx.client_supports_extension(UI_EXTENSION_ID),
     )
-)
+
+
+def _login_result_from_submit(ctx: Context, mode: ResolvedLoginMode, message: str) -> LoginResult:
+    ok = message.startswith("Logged in to SimpleShop.")
+    return _login_result(
+        ctx,
+        mode=mode,
+        status="logged_in" if ok else "error",
+        message=message,
+        ok=ok,
+    )
+
+
+def _simpleshop_login_prefab_app(web_submit_url: str | None = None) -> PrefabApp:
+    if web_submit_url:
+        submit_action = Fetch(
+            web_submit_url,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            body={"email": Rx("email"), "api_key": Rx("api_key")},
+            onSuccess=[
+                SetState("message", "{{ $result.message }}"),
+                ShowToast("{{ $result.message }}", variant="success"),
+            ],
+            onError=ShowToast("SimpleShop login failed.", variant="error"),
+        )
+    else:
+        submit_action = CallTool(
+            "simpleshop_login",
+            arguments={
+                "mode": "direct",
+                "credentials": {"email": Rx("email"), "api_key": Rx("api_key")},
+            },
+            onSuccess=[
+                SetState("message", "{{ $result.message }}"),
+                ShowToast("{{ $result.message }}", variant="success"),
+            ],
+            onError=ShowToast("SimpleShop login failed.", variant="error"),
+        )
+
+    with Column(gap=4, css_class="p-6 max-w-md") as view:
+        Heading("Sign in to SimpleShop", level=2)
+        Muted("Credentials are validated with SimpleShop and stored locally for this MCP scope.")
+        with Form(onSubmit=submit_action):
+            Input(name="email", inputType="email", placeholder="Email", required=True)
+            Input(name="api_key", inputType="password", placeholder="API key", required=True)
+            Button("Sign in", buttonType="submit")
+        Text(content=Rx("message"))
+    return PrefabApp(title="SimpleShop Login", view=view, state={"message": ""})
+
+
+class _SimpleShopLoginHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        server = self.server
+        token = getattr(server, "login_token", "")
+        if self.path.rstrip("/") != f"/{token}":
+            self.send_error(404)
+            return
+        submit_url = f"http://127.0.0.1:{server.server_port}/{token}/submit"
+        html = _simpleshop_login_prefab_app(submit_url).html()
+        body = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self) -> None:
+        server = self.server
+        token = getattr(server, "login_token", "")
+        if self.path != f"/{token}/submit":
+            self.send_error(404)
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length).decode("utf-8")
+        try:
+            if "application/json" in self.headers.get("Content-Type", ""):
+                payload = json.loads(raw or "{}")
+            else:
+                parsed = parse_qs(raw)
+                payload = {key: values[-1] for key, values in parsed.items()}
+            message = _login_on_submit(SimpleShopLogin.model_validate(payload))
+            ok = message.startswith("Logged in to SimpleShop.")
+            self._send_json({"ok": ok, "message": message})
+        except Exception as exc:
+            self._send_json({"ok": False, "message": str(exc)}, status=400)
+
+    def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return
+
+
+def _start_simpleshop_web_login() -> str:
+    token = secrets.token_urlsafe(24)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _SimpleShopLoginHandler)
+    server.login_token = token  # type: ignore[attr-defined]
+    _WEB_LOGIN_SERVERS[token] = server
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{server.server_port}/{token}"
 
 
 def _requires_login(fn):
@@ -113,13 +303,13 @@ def _requires_login(fn):
         client: SimpleShopClient = ctx.lifespan_context["simpleshop_client"]
         if not client.is_authenticated():
             hint = (
-                "Not signed in to SimpleShop. Call the `simpleshop_login` tool first — "
-                "the user will be prompted with a form to enter their email and API key."
+                "Not signed in to SimpleShop. Call the `simpleshop_login` tool first. "
+                "It supports auto, direct, Prefab, and web login modes."
             )
             if not ctx.client_supports_extension(UI_EXTENSION_ID):
                 hint += (
-                    " (Note: this client doesn't render the inline form UI; "
-                    "the user can instead set SIMPLESHOP_LOGIN / SIMPLESHOP_API_KEY "
+                    " (Note: this client doesn't render the inline form UI; use mode=web "
+                    "or mode=direct, set SIMPLESHOP_LOGIN / SIMPLESHOP_API_KEY, "
                     "or pre-seed the cwd-scoped OS keyring/fallback credential file.)"
                 )
             raise ToolError(hint)
@@ -1492,6 +1682,9 @@ def _buyer_column_key(value: str | None) -> str:
 
 def main() -> None:
     mcp.run()
+
+
+mcp.tool(simpleshop_login, app=True)
 
 
 if __name__ == "__main__":
