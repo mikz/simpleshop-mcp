@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from pydantic import SecretStr
 
 from models import RawProduct
 from settings import Settings
@@ -21,14 +22,51 @@ class SimpleShopError(RuntimeError):
         self.payload = payload
 
 
+class NotAuthenticatedError(SimpleShopError):
+    def __init__(self) -> None:
+        super().__init__("SimpleShop credentials not configured. Call simpleshop_login first.")
+
+
 class SimpleShopClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._base_url = str(settings.simpleshop_base_url).rstrip("/") + "/"
-        self._client = self._make_client()
+        self._client: httpx.AsyncClient | None = None
+        if settings.simpleshop_login and settings.simpleshop_api_key:
+            self._client = self._build_client(
+                settings.simpleshop_login,
+                settings.simpleshop_api_key.get_secret_value(),
+            )
+
+    def is_authenticated(self) -> bool:
+        return self._client is not None
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    def set_credentials_sync(self, login: str, api_key: str) -> None:
+        """Replace the active credentials without awaiting.
+
+        The previous httpx.AsyncClient (if any) is detached and left to be
+        garbage-collected. Callers running inside the asyncio loop can use
+        ``replace_credentials`` instead to await a clean close of the old
+        client.
+        """
+        self._client = self._build_client(login, api_key)
+        self._settings.simpleshop_login = login
+        self._settings.simpleshop_api_key = SecretStr(api_key)
+
+    async def replace_credentials(self, login: str, api_key: str) -> None:
+        old = self._client
+        self.set_credentials_sync(login, api_key)
+        if old is not None:
+            await old.aclose()
 
     async def request(
         self,
@@ -38,7 +76,8 @@ class SimpleShopClient:
         params: dict[str, Any] | None = None,
         json: dict[str, Any] | None = None,
     ) -> Any:
-        response = await self._client.request(
+        client = self._require_client()
+        response = await client.request(
             method,
             path.lstrip("/"),
             params=params,
@@ -47,19 +86,20 @@ class SimpleShopClient:
         return self._parse_response(response)
 
     async def download_url(self, url: str) -> tuple[bytes, str | None]:
-        response = await self._client.get(url, follow_redirects=True)
+        client = self._require_client()
+        response = await client.get(url, follow_redirects=True)
         return self._parse_download_response(response)
 
-    def _make_client(self) -> httpx.AsyncClient:
-        auth = httpx.BasicAuth(
-            self._settings.simpleshop_login,
-            self._settings.simpleshop_api_key.get_secret_value(),
-        )
-        timeout = httpx.Timeout(self._settings.simpleshop_timeout_seconds)
+    def _require_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            raise NotAuthenticatedError()
+        return self._client
+
+    def _build_client(self, login: str, api_key: str) -> httpx.AsyncClient:
         return httpx.AsyncClient(
             base_url=self._base_url,
-            auth=auth,
-            timeout=timeout,
+            auth=httpx.BasicAuth(login, api_key),
+            timeout=httpx.Timeout(self._settings.simpleshop_timeout_seconds),
             follow_redirects=False,
         )
 

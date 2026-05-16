@@ -2,6 +2,7 @@ from datetime import date
 
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 import server as server
 from models import RawProduct
@@ -31,6 +32,7 @@ from server import (
     _sort_to_api,
     _strict_mode_to_api,
 )
+from settings import Settings
 from tests.fixtures import invoice_fixture
 
 
@@ -51,6 +53,7 @@ async def test_exposed_tool_catalog_matches_locked_design(dummy_simpleshop_env: 
         "simpleshop_find_products",
         "simpleshop_get_product_sales",
         "simpleshop_get_metadata",
+        "simpleshop_login",
     ]
 
 
@@ -70,6 +73,28 @@ async def test_fastmcp_schema_hides_context_dependency(dummy_simpleshop_env: Non
     assert products_query["properties"]["mode"]["enum"] == ["search", "by_ids"]
     assert "oneOf" not in products_query
     assert "oneOf" not in documents_query
+
+
+async def test_login_gated_tools_report_clear_runtime_login_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        server,
+        "load_settings",
+        lambda: Settings(
+            SIMPLESHOP_LOGIN=None,
+            SIMPLESHOP_API_KEY=None,
+            SIMPLESHOP_BASE_URL="https://api.simpleshop.cz/2.0/",
+        ),
+    )
+
+    async with Client(server.mcp) as client:
+        with pytest.raises(ToolError) as exc_info:
+            await client.call_tool("simpleshop_find_products", {"query": {"mode": "search"}})
+
+    message = str(exc_info.value)
+    assert "Call the `simpleshop_login` tool first" in message
+    assert "SIMPLESHOP_LOGIN / SIMPLESHOP_API_KEY" in message
 
 
 def test_human_document_type_mapping_to_simple_shop_api_values() -> None:

@@ -18,9 +18,11 @@ send, or mutate SimpleShop records.
 /plugin install simpleshop-mcp@simpleshop-mcp
 ```
 
-When the plugin is enabled the host prompts for **SimpleShop login** and
-**SimpleShop API key**. The API key is masked, stored in your OS keychain, and
-injected into the MCP server's environment at launch.
+The server starts without credentials. To sign in, call the
+`simpleshop_login` MCP tool. Clients that support FastMCP Apps render an inline
+form for the SimpleShop account email and API key. The server validates those
+credentials against SimpleShop, persists them locally, and updates the running
+MCP server so the read-only accounting tools are ready immediately.
 
 Requirements on the host machine:
 
@@ -45,6 +47,7 @@ Requirements on the host machine:
 ## Tool Surface
 
 ```text
+simpleshop_login
 simpleshop_test_login
 simpleshop_find_documents
 simpleshop_download_documents
@@ -53,10 +56,9 @@ simpleshop_get_product_sales
 simpleshop_get_metadata
 ```
 
+`simpleshop_login` collects and validates credentials at runtime.
 `simpleshop_test_login` takes no arguments and is the quickest way to confirm
-your `.env` credentials work — it calls SimpleShop's `test/` endpoint and
-returns `{ "ok": true }` on success or a structured `{ "ok": false, "error": ... }`
-otherwise.
+the current credentials work. It reports `not_logged_in` when none are available.
 
 Finder tools use a concrete `query` object with a required `mode` field:
 
@@ -108,8 +110,9 @@ Raw fields are guarded:
 
 The project currently pins:
 
-- `fastmcp==3.3.0`
+- `fastmcp[apps]==3.3.0`
 - `httpx==0.28.1`
+- `keyring>=25.0,<26`
 - `pydantic==2.13.4`
 - `pydantic-settings==2.14.1`
 
@@ -128,16 +131,24 @@ Using `uv` directly:
 uv sync --locked
 ```
 
-## Configuration
+## Login And Configuration
 
-Create a local `.env` from the example or set the variables in your MCP host
-environment:
+The preferred path is runtime login through the `simpleshop_login` MCP tool.
+After successful validation, credentials are stored locally and loaded on future
+starts in this order:
+
+1. `SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY` environment variables
+2. OS keyring under service `simpleshop-mcp`, accounts `login` and `api_key`
+3. `${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/credentials.env`
+
+For headless clients, pre-seed credentials through a local `.env`, environment
+variables, or the credentials file. To create a local `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-Required:
+Credential format:
 
 ```bash
 SIMPLESHOP_LOGIN=user@example.com
@@ -156,10 +167,10 @@ Do not commit `.env` or real API credentials.
 ## Running
 
 > The plugin's MCP server config lives inline in `.claude-plugin/plugin.json`
-> (uses `uvx --from ${CLAUDE_PLUGIN_ROOT}` + `${user_config.*}` env injection).
-> No `.mcp.json` is committed at the repo root, so workspace-mode Claude Code
-> sessions in this directory do not try to launch the server — run it with
-> one of the commands below instead.
+> and uses `uvx --from ${CLAUDE_PLUGIN_ROOT} simpleshop-mcp`. No `.mcp.json` is
+> committed at the repo root, so workspace-mode Claude Code sessions in this
+> directory do not try to launch the server. Run it with one of the commands
+> below instead.
 
 Run the MCP server over stdio:
 
