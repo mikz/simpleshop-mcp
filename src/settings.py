@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from contextlib import suppress
+from hashlib import sha256
 from pathlib import Path
 
 from pydantic import AnyHttpUrl, Field, SecretStr
@@ -10,6 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 KEYRING_SERVICE = "simpleshop-mcp"
 KEYRING_LOGIN_ACCOUNT = "login"
 KEYRING_API_KEY_ACCOUNT = "api_key"
+CREDENTIAL_SCOPE_ID_LENGTH = 16
 
 
 class Settings(BaseSettings):
@@ -30,7 +32,20 @@ class Settings(BaseSettings):
 
 def credentials_file_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "simpleshop-mcp" / "credentials.env"
+    return Path(base) / "simpleshop-mcp" / "scopes" / credential_scope_id() / "credentials.env"
+
+
+def credential_scope_cwd() -> Path:
+    return Path.cwd().resolve()
+
+
+def credential_scope_id() -> str:
+    scope = str(credential_scope_cwd()).encode("utf-8")
+    return sha256(scope).hexdigest()[:CREDENTIAL_SCOPE_ID_LENGTH]
+
+
+def keyring_service_name() -> str:
+    return f"{KEYRING_SERVICE}:{credential_scope_id()}"
 
 
 def _load_from_keyring() -> tuple[str, str] | None:
@@ -39,8 +54,9 @@ def _load_from_keyring() -> tuple[str, str] | None:
     except Exception:
         return None
     try:
-        login = keyring.get_password(KEYRING_SERVICE, KEYRING_LOGIN_ACCOUNT)
-        api_key = keyring.get_password(KEYRING_SERVICE, KEYRING_API_KEY_ACCOUNT)
+        service = keyring_service_name()
+        login = keyring.get_password(service, KEYRING_LOGIN_ACCOUNT)
+        api_key = keyring.get_password(service, KEYRING_API_KEY_ACCOUNT)
     except Exception:
         return None
     if login and api_key:
@@ -75,8 +91,10 @@ def store_credentials(login: str, api_key: str) -> None:
     """Best-effort: write to OS keyring AND to the cred file (0600)."""
     try:
         import keyring
-        keyring.set_password(KEYRING_SERVICE, KEYRING_LOGIN_ACCOUNT, login)
-        keyring.set_password(KEYRING_SERVICE, KEYRING_API_KEY_ACCOUNT, api_key)
+
+        service = keyring_service_name()
+        keyring.set_password(service, KEYRING_LOGIN_ACCOUNT, login)
+        keyring.set_password(service, KEYRING_API_KEY_ACCOUNT, api_key)
     except Exception:
         pass
     cfg = credentials_file_path()

@@ -60,13 +60,13 @@ server. The form asks for:
 - `email`: SimpleShop account email, used as the HTTP Basic username
 - `api_key`: API key from SimpleShop account settings
 
-Successful login stores credentials in the OS keyring when available and in
-`${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/credentials.env` with mode
-`0600`.
+Successful login stores credentials in a store scoped to the server process
+`cwd`: OS keyring service `simpleshop-mcp:<scope-id>` when available, plus
+`${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/scopes/<scope-id>/credentials.env`
+with mode `0600`.
 
 Clients that do not render the inline form can pre-seed credentials with
-`SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY`, the OS keyring service
-`simpleshop-mcp`, or the credentials file.
+`SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY` or the cwd-scoped credential store.
 
 ## `simpleshop_test_login`
 
@@ -109,15 +109,28 @@ invoices.
     "mode": "search",
     "created_from": "2026-05-01",
     "created_to": "2026-05-31",
-    "document_types": ["invoice", "tax_document", "receipt", "order"],
-    "without_flags": ["canceled", "archived"],
+    "document_types": [
+      "invoice",
+      "advance_invoice",
+      "proforma",
+      "payment_request",
+      "tax_document",
+      "receipt"
+    ],
     "test_mode": "production",
     "limit": 100,
     "cursor": null,
-    "include_pdf_resources": true
+    "include_pdf_resources": false
   }
 }
 ```
+
+When `document_types` is omitted or empty in search mode, the default is the
+same reconciliation-oriented set shown above. Orders are intentionally excluded
+because they often share the same variable symbol and amount as the resulting
+invoice. Pass `document_types: ["order"]` explicitly for order/fulfillment
+workflows, or include `order` explicitly when duplicate payment candidates are
+useful context.
 
 Explicit IDs:
 
@@ -165,13 +178,16 @@ oss
 
 Use `exact_flags`, `has_any_flags`, `has_all_flags`, and `without_flags`.
 
-The response includes document metadata, `variable_symbol`, redacted customer
-presence flags, line items, product IDs found in line item metadata, PDF resource
-URIs, and control totals for search mode. Use `variable_symbol` with Fio's
-`variable_symbol` transaction filter when reconciling arrived bank payments. Set
-`include_customer_pii: true` to return full customer name/contact/address fields.
-`include_raw` also requires `include_customer_pii: true` because raw SimpleShop
-document payloads contain customer data.
+The response includes document metadata, `variable_symbol`, `currency`, `total`,
+`total_without_vat`, redacted customer presence flags, line items, product IDs
+found in line item metadata, optional PDF resource URIs, and control totals for
+search mode. These names mirror SimpleShop's document-level fields. For payment
+reconciliation, match Fio incoming transactions by `variable_symbol`, `currency`,
+and `total`. If you explicitly request orders too, use `document_type` and
+`raw_ids.id_parent` to distinguish orders from the resulting accounting
+documents. Set `include_customer_pii: true` to return full customer
+name/contact/address fields. `include_raw` also requires `include_customer_pii:
+true` because raw SimpleShop document payloads contain customer data.
 
 ## `simpleshop_download_documents`
 

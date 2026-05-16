@@ -120,13 +120,13 @@ def _requires_login(fn):
                 hint += (
                     " (Note: this client doesn't render the inline form UI; "
                     "the user can instead set SIMPLESHOP_LOGIN / SIMPLESHOP_API_KEY "
-                    "via OS keyring or "
-                    "$XDG_CONFIG_HOME/simpleshop-mcp/credentials.env.)"
+                    "or pre-seed the cwd-scoped OS keyring/fallback credential file.)"
                 )
             raise ToolError(hint)
         return await fn(*args, **kwargs)
 
     return wrapper
+
 
 DocumentTypeFilter = Literal[
     "invoice",
@@ -172,6 +172,14 @@ DocumentFlag = Literal[
     "awaiting_shipping_export",
     "archived",
     "oss",
+]
+DEFAULT_RECONCILIATION_DOCUMENT_TYPES: list[DocumentTypeFilter] = [
+    "invoice",
+    "advance_invoice",
+    "proforma",
+    "payment_request",
+    "tax_document",
+    "receipt",
 ]
 
 DOCUMENT_TYPE_TO_API: dict[str, int] = {
@@ -277,11 +285,17 @@ class FindDocumentsQuery(BaseModel):
                     "mode": "search",
                     "created_from": "2026-05-01",
                     "created_to": "2026-05-31",
-                    "document_types": ["invoice", "tax_document", "receipt", "order"],
-                    "without_flags": ["canceled", "archived"],
+                    "document_types": [
+                        "invoice",
+                        "advance_invoice",
+                        "proforma",
+                        "payment_request",
+                        "tax_document",
+                        "receipt",
+                    ],
                     "test_mode": "production",
                     "limit": 100,
-                    "include_pdf_resources": True,
+                    "include_pdf_resources": False,
                     "include_customer_pii": False,
                 },
                 {
@@ -308,7 +322,16 @@ class FindDocumentsQuery(BaseModel):
     due: date | None = None
     taxable_supply: date | None = None
     paid_at: date | None = None
-    document_types: list[DocumentTypeFilter] = Field(default_factory=list)
+    document_types: list[DocumentTypeFilter] = Field(
+        default=DEFAULT_RECONCILIATION_DOCUMENT_TYPES,
+        description=(
+            "Document types to search. Defaults to settlement/accounting documents "
+            "used for payment reconciliation: invoice, advance_invoice, proforma, "
+            "payment_request, tax_document, receipt. Orders are intentionally excluded "
+            "by default because they often share the same payment variable symbol as "
+            'the resulting invoice; pass ["order"] explicitly for order workflows.'
+        ),
+    )
     customer_id: int | None = None
     number_series_id: int | None = None
     center_id: int | None = None
@@ -321,9 +344,9 @@ class FindDocumentsQuery(BaseModel):
     total_without_vat: float | None = None
     days_due: int | None = None
     payment_state: PaymentState = "any"
-    cancellation_state: CancellationState = "any"
-    test_mode: TestModeState = "any"
-    archive_state: ArchiveState = "any"
+    cancellation_state: CancellationState = "active"
+    test_mode: TestModeState = "production"
+    archive_state: ArchiveState = "active"
     exact_flags: list[DocumentFlag] = Field(default_factory=list)
     has_any_flags: list[DocumentFlag] = Field(default_factory=list)
     has_all_flags: list[DocumentFlag] = Field(default_factory=list)
@@ -334,7 +357,7 @@ class FindDocumentsQuery(BaseModel):
     sort: SortOrder = "newest"
     api_sort: str | None = None
     api_filter: str | None = None
-    include_pdf_resources: bool = True
+    include_pdf_resources: bool = False
     include_raw: bool = Field(
         default=False,
         description="Return raw SimpleShop document payloads. Requires include_customer_pii=true.",
@@ -364,7 +387,9 @@ class FindDocumentsQuery(BaseModel):
                 "due": _api_date(self.due),
                 "taxable_supply": _api_date(self.taxable_supply),
                 "paid_at": _api_date(self.paid_at),
-                "document_types": sorted(self.document_types),
+                "document_types": sorted(
+                    self.document_types or DEFAULT_RECONCILIATION_DOCUMENT_TYPES
+                ),
                 "customer_id": self.customer_id,
                 "number_series_id": self.number_series_id,
                 "center_id": self.center_id,
@@ -484,12 +509,6 @@ class DocumentDates(BaseModel):
     paid: str | None = None
 
 
-class DocumentAmounts(BaseModel):
-    currency: str | None = None
-    total: str | None = None
-    total_without_vat: str | None = None
-
-
 class FoundDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -503,7 +522,9 @@ class FoundDocument(BaseModel):
     decoded_flags: list[str] = Field(default_factory=list)
     states: DocumentStates | None = None
     dates: DocumentDates | None = None
-    amounts: DocumentAmounts | None = None
+    currency: str | None = None
+    total: str | None = None
+    total_without_vat: str | None = None
     customer: dict[str, Any] = Field(default_factory=dict)
     product_ids: list[int] = Field(default_factory=list)
     pdf_resources: list[PdfResource] = Field(default_factory=list)
@@ -545,13 +566,11 @@ class FoundDocument(BaseModel):
                 taxable_supply=record.date_taxable_supply,
                 paid=record.date_paid,
             ),
-            amounts=DocumentAmounts(
-                currency=record.currency,
-                total=str(record.total) if record.total is not None else None,
-                total_without_vat=str(record.total_without_vat)
-                if record.total_without_vat is not None
-                else None,
-            ),
+            currency=record.currency,
+            total=str(record.total) if record.total is not None else None,
+            total_without_vat=str(record.total_without_vat)
+            if record.total_without_vat is not None
+            else None,
             customer=_customer_payload(record, include_customer_pii=include_customer_pii),
             product_ids=_product_ids_from_record(record),
             pdf_resources=_pdf_resources(record) if include_pdf_resources else [],
@@ -996,7 +1015,7 @@ async def _find_documents_by_search(
     )
     records: list[AccountingDocument] = []
     raw_records_out = []
-    document_types = query.document_types or [None]
+    document_types = query.document_types or DEFAULT_RECONCILIATION_DOCUMENT_TYPES
     for document_type in document_types:
         params = _document_search_params(query, document_type, offset)
         raw_records = await client.search_invoices(params)

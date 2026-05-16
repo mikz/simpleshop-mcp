@@ -33,6 +33,9 @@ Requirements on the host machine:
 
 - Find SimpleShop documents across invoices, proformas, receipts, orders, tax
   documents, and related document types.
+- Default document search is payment-reconciliation oriented: invoices,
+  advance invoices, proformas, payment requests, tax documents, and receipts.
+  Orders are explicit because they often duplicate invoice payment keys.
 - Batch-download document PDFs, with per-document success/error results.
 - Expose document PDFs as MCP resources:
   `simpleshop://documents/{document_id}/pdf/{variant}`.
@@ -83,6 +86,9 @@ or:
 
 `by_ids` mode requires IDs and ignores stray search filters so retry calls remain
 robust when an agent carries over defaults from schema discovery.
+For `simpleshop_find_documents`, omitting `document_types` defaults to
+settlement/accounting documents used for payment reconciliation. Pass
+`document_types: ["order"]` explicitly for order workflows.
 
 See [TOOLS.md](TOOLS.md) for full schemas, examples, cursor behavior, and
 privacy controls. The design rationale is in [DESIGN.md](DESIGN.md).
@@ -138,8 +144,12 @@ After successful validation, credentials are stored locally and loaded on future
 starts in this order:
 
 1. `SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY` environment variables
-2. OS keyring under service `simpleshop-mcp`, accounts `login` and `api_key`
-3. `${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/credentials.env`
+2. OS keyring under service `simpleshop-mcp:<scope-id>`, accounts `login` and `api_key`
+3. `${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/scopes/<scope-id>/credentials.env`
+
+`scope-id` is derived from the canonical server process `cwd`, so credentials
+are isolated per MCP `cwd`. Legacy unscoped stores such as
+`${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/credentials.env` are not read.
 
 For headless clients, pre-seed credentials through a local `.env`, environment
 variables, or the credentials file. To create a local `.env`:
