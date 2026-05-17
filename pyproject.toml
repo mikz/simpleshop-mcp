@@ -1,6 +1,6 @@
 [project]
 name = "simpleshop-mcp"
-version = "0.3.1"
+version = "0.3.2"
 description = "Read-only SimpleShop MCP server for accounting agents"
 readme = "README.md"
 license = "MIT"
