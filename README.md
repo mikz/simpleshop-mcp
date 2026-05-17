@@ -156,12 +156,13 @@ After successful validation, credentials are stored locally and loaded on future
 starts in this order:
 
 1. `SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY` environment variables
-2. OS keyring under service `simpleshop-mcp:<scope-id>`, accounts `login` and `api_key`
-3. `${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/scopes/<scope-id>/credentials.env`
+2. OS keyring under service `simpleshop-mcp`, accounts `login` and `api_key`
+3. `${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/credentials.env`
 
-`scope-id` is derived from the canonical server process `cwd`, so credentials
-are isolated per MCP `cwd`. Legacy unscoped stores such as
-`${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/credentials.env` are not read.
+To isolate credentials per server process `cwd`, set `SIMPLESHOP_SCOPED_CREDENTIALS=1`.
+The keyring service then becomes `simpleshop-mcp:<scope-id>` and the fallback
+file moves to `${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/scopes/<scope-id>/credentials.env`,
+where `scope-id` is the sha256 prefix of the canonical cwd.
 
 For headless clients, pre-seed credentials through a local `.env`, environment
 variables, or the credentials file. To create a local `.env`:
