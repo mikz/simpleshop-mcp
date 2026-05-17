@@ -511,57 +511,240 @@ class FindDocumentsQuery(BaseModel):
             "Pass this query as an object, not a string."
         )
     )
-    ids: list[int] = Field(default_factory=list, max_length=100)
-    created_from: date | None = None
-    created_to: date | None = None
-    created: date | None = None
-    due: date | None = None
-    taxable_supply: date | None = None
-    paid_from: date | None = None
-    paid_to: date | None = None
+    ids: list[int] = Field(
+        default_factory=list,
+        max_length=100,
+        description=(
+            "Document IDs (1–100). Required when mode='by_ids'; must be empty when "
+            "mode='search'."
+        ),
+    )
+    created_from: date | None = Field(
+        default=None,
+        description=(
+            "Filter by document creation date (ISO YYYY-MM-DD). Combine with created_to "
+            "for a range. NOT the same as paid_from/paid_to — use those for payment "
+            "reconciliation."
+        ),
+    )
+    created_to: date | None = Field(
+        default=None,
+        description="Inclusive upper bound on creation date (ISO YYYY-MM-DD).",
+    )
+    created: date | None = Field(
+        default=None,
+        description="Filter to documents created on this exact date (ISO YYYY-MM-DD).",
+    )
+    due: date | None = Field(
+        default=None,
+        description="Filter to documents with this exact due date (ISO YYYY-MM-DD).",
+    )
+    taxable_supply: date | None = Field(
+        default=None,
+        description="Filter to documents whose taxable supply date is this exact day.",
+    )
+    paid_from: date | None = Field(
+        default=None,
+        description=(
+            "Filter by the document's payment date (ISO YYYY-MM-DD). Use for monthly "
+            "reconciliation: paid_from='2026-05-01', paid_to='2026-05-31' returns "
+            "documents marked paid in May. The payment date is as recorded on the "
+            "document — cross-reference Fio if you need bank-settlement proof."
+        ),
+    )
+    paid_to: date | None = Field(
+        default=None,
+        description="Inclusive upper bound on payment date (ISO YYYY-MM-DD).",
+    )
     document_types: list[DocumentTypeFilter] = Field(
         default=DEFAULT_RECONCILIATION_DOCUMENT_TYPES,
         description=(
             "Document types to search. Defaults to settlement/accounting documents "
             "used for payment reconciliation: invoice, advance_invoice, proforma, "
             "payment_request, tax_document, receipt. Orders are intentionally excluded "
-            "by default because they often share the same payment variable symbol as "
-            'the resulting invoice; pass ["order"] explicitly for order workflows.'
+            "by default because they share the same variable_symbol as the invoice "
+            'generated from them; pass ["order"] (or include "order" alongside others) '
+            "for order workflows."
         ),
     )
-    customer_id: int | None = None
-    number_series_id: int | None = None
-    center_id: int | None = None
-    tag_id: int | None = None
-    parent_id: int | None = None
-    number: str | None = None
-    variable_symbol: str | None = None
-    currency: str | None = None
-    total: Decimal | None = None
-    total_without_vat: Decimal | None = None
-    days_due: int | None = None
-    payment_state: PaymentState = "any"
-    cancellation_state: CancellationState = "active"
-    test_mode: TestModeState = "production"
-    archive_state: ArchiveState = "active"
-    exact_flags: list[DocumentFlag] = Field(default_factory=list)
-    has_any_flags: list[DocumentFlag] = Field(default_factory=list)
-    has_all_flags: list[DocumentFlag] = Field(default_factory=list)
-    without_flags: list[DocumentFlag] = Field(default_factory=list)
-    search_text: str | None = None
-    limit: int = Field(default=100, ge=1, le=500)
-    cursor: str | None = None
-    sort: SortOrder = "newest"
-    api_sort: str | None = None
-    api_filter: str | None = None
-    include_pdf_resources: bool = False
+    customer_id: int | None = Field(
+        default=None,
+        description="Filter to documents belonging to a single SimpleShop customer id.",
+    )
+    number_series_id: int | None = Field(
+        default=None,
+        description=(
+            "Filter to a single document number series id. See "
+            "simpleshop_get_metadata.number_series for available ids."
+        ),
+    )
+    center_id: int | None = Field(
+        default=None,
+        description="Filter to a single SimpleShop cost-center id.",
+    )
+    tag_id: int | None = Field(
+        default=None,
+        description=(
+            "Filter to a single document tag id. See simpleshop_get_metadata.tags for "
+            "available ids."
+        ),
+    )
+    parent_id: int | None = Field(
+        default=None,
+        description=(
+            "Filter to documents whose parent_id matches this value. Invoices and "
+            "tax_documents generated from an order carry parent_id=<order id>; use this "
+            "to fetch every invoice derived from a given order. Orders themselves have "
+            "no parent."
+        ),
+    )
+    number: str | None = Field(
+        default=None,
+        description=(
+            "Exact-match filter on the document's sequential `number` within its type "
+            "(e.g. order numbers run in their own series, invoice numbers in another). "
+            "NOT the same as `variable_symbol` — `number` identifies the document; "
+            "`variable_symbol` is the customer-facing payment identifier shared between "
+            "an order and the invoice generated from it."
+        ),
+    )
+    variable_symbol: str | None = Field(
+        default=None,
+        description=(
+            "Exact-match filter on the customer-facing payment identifier (VS). The order "
+            "and the invoice generated from it share the same `variable_symbol` — pass "
+            "document_types=['order','invoice','tax_document'] alongside this filter to "
+            "fetch both in a single call. NOT the same as `number` (the document's own "
+            "sequential identifier within its type)."
+        ),
+    )
+    currency: str | None = Field(
+        default=None,
+        description="Exact-match currency filter (e.g. 'CZK', 'EUR').",
+    )
+    total: Decimal | None = Field(
+        default=None,
+        description="Filter to documents with this exact total (decimal, with VAT).",
+    )
+    total_without_vat: Decimal | None = Field(
+        default=None,
+        description="Filter to documents with this exact total excluding VAT.",
+    )
+    days_due: int | None = Field(
+        default=None,
+        description="Filter to documents whose payment term equals this many days.",
+    )
+    payment_state: PaymentState = Field(
+        default="any",
+        description=(
+            "Payment state filter: 'any' (default), 'paid', 'partially_paid', 'unpaid', "
+            "'overpaid'. For monthly reconciliation prefer 'paid' or 'partially_paid'."
+        ),
+    )
+    cancellation_state: CancellationState = Field(
+        default="active",
+        description=(
+            "Cancellation filter: 'active' (default — excludes canceled docs), 'canceled', "
+            "or 'any'."
+        ),
+    )
+    test_mode: TestModeState = Field(
+        default="production",
+        description=(
+            "Test-mode filter: 'production' (default — real documents only), 'test', or "
+            "'any'. Use 'production' for accounting to skip test-mode entries."
+        ),
+    )
+    archive_state: ArchiveState = Field(
+        default="active",
+        description="Archive filter: 'active' (default), 'archived', or 'any'.",
+    )
+    exact_flags: list[DocumentFlag] = Field(
+        default_factory=list,
+        description=(
+            "Match documents whose flags equal exactly this set. See "
+            "simpleshop_get_metadata.flags for available flag names."
+        ),
+    )
+    has_any_flags: list[DocumentFlag] = Field(
+        default_factory=list,
+        description="Match documents that carry any of these flags.",
+    )
+    has_all_flags: list[DocumentFlag] = Field(
+        default_factory=list,
+        description="Match documents that carry all of these flags.",
+    )
+    without_flags: list[DocumentFlag] = Field(
+        default_factory=list,
+        description="Exclude documents that carry any of these flags.",
+    )
+    search_text: str | None = Field(
+        default=None,
+        description=(
+            "Free-text search delegated to the SimpleShop API (matches document fields "
+            "such as note, item text, and customer name)."
+        ),
+    )
+    limit: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum documents returned per page (1–500, default 100).",
+    )
+    cursor: str | None = Field(
+        default=None,
+        description=(
+            "Opaque cursor from a previous response's `next_cursor`. The cursor encodes "
+            "a hash of the filters that produced it; if any filter differs between "
+            "paginated calls the server rejects the cursor (audit-safe pagination). For "
+            "a new filter set, omit `cursor`."
+        ),
+    )
+    sort: SortOrder = Field(
+        default="newest",
+        description=(
+            "Result ordering: 'newest', 'oldest', 'number_asc', or 'number_desc'. Ignored "
+            "in mode='by_ids'."
+        ),
+    )
+    api_sort: str | None = Field(
+        default=None,
+        description=(
+            "Raw SimpleShop API `sort` override; bypasses the normalized `sort` enum. "
+            "Use only when the standard options are insufficient."
+        ),
+    )
+    api_filter: str | None = Field(
+        default=None,
+        description=(
+            "Raw SimpleShop API `filter` override; appended to whatever this MCP would "
+            "send. Rarely needed; prefer the structured filters above."
+        ),
+    )
+    include_pdf_resources: bool = Field(
+        default=False,
+        description=(
+            "Defaults to `false`. Set `true` to include PDF download URIs (with_stamp / "
+            "without_stamp variants) in the response. Adds noticeable bytes per "
+            "document; pair with simpleshop_download_documents to fetch the actual PDF."
+        ),
+    )
     include_raw: bool = Field(
         default=False,
-        description="Return raw SimpleShop document payloads. Requires include_customer_pii=true.",
+        description=(
+            "Defaults to `false`. Set `true` to return the raw SimpleShop API payload "
+            "alongside the normalized fields. Requires `include_customer_pii=true` so "
+            "raw customer data is not exposed by accident."
+        ),
     )
     include_customer_pii: bool = Field(
         default=False,
-        description="Return full customer name/contact/address fields. Defaults to redacted.",
+        description=(
+            "Defaults to `false` — the customer block is redacted to "
+            "`{redacted: true, country_code, has_*: bool}`. Set `true` to include name, "
+            "email, phone, address, identifiers (needed for accounting confirmations "
+            "and tax compliance). Required when `include_raw=true`."
+        ),
     )
 
     @model_validator(mode="after")
@@ -649,14 +832,62 @@ class FindProductsQuery(BaseModel):
             "Pass this query as an object, not a string."
         )
     )
-    ids: list[int] = Field(default_factory=list, max_length=100)
-    search_text: str | None = None
-    product_types: list[ProductTypeFilter] = Field(default_factory=list)
-    include_archived: bool = False
-    test_mode: TestModeState = "production"
-    include_variants: bool = True
-    limit: int = Field(default=100, ge=1, le=500)
-    cursor: str | None = None
+    ids: list[int] = Field(
+        default_factory=list,
+        max_length=100,
+        description=(
+            "Product IDs (1–100). Required when mode='by_ids'; must be empty when "
+            "mode='search'."
+        ),
+    )
+    search_text: str | None = Field(
+        default=None,
+        description=(
+            "Case-insensitive substring search over product name and description. "
+            "Example: 'shirt' matches 'T-Shirt Pro'. Ignored when mode='by_ids'."
+        ),
+    )
+    product_types: list[ProductTypeFilter] = Field(
+        default_factory=list,
+        description=(
+            "Filter by product type. See simpleshop_get_metadata.product_types for "
+            "supported codes. Omit to include all types."
+        ),
+    )
+    include_archived: bool = Field(
+        default=False,
+        description=(
+            "Defaults to `false` (active products only). Set `true` to include archived "
+            "products in the result."
+        ),
+    )
+    test_mode: TestModeState = Field(
+        default="production",
+        description=(
+            "Test-mode filter: 'production' (default), 'test', or 'any'. Use 'production' "
+            "to skip test products."
+        ),
+    )
+    include_variants: bool = Field(
+        default=True,
+        description=(
+            "Defaults to `true`. Set `false` to omit per-variant rows (sizes, colors) and "
+            "return only the parent product summary — cuts response size noticeably."
+        ),
+    )
+    limit: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum products returned per page (1–500, default 100).",
+    )
+    cursor: str | None = Field(
+        default=None,
+        description=(
+            "Opaque cursor from a previous response's `next_cursor`. Cursor invalidates "
+            "if any filter changes between paginated calls — omit for a new filter set."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_mode(self) -> FindProductsQuery:
@@ -712,17 +943,54 @@ class DocumentDates(BaseModel):
 class FoundDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    id: int
-    ok: bool = True
-    number: str | None = None
-    variable_symbol: str | None = None
-    document_type: str | None = None
-    parent_id: int | None = None
+    id: int = Field(description="SimpleShop internal document id (numeric, stable).")
+    ok: bool = Field(
+        default=True,
+        description="False when this entry represents a per-id error inside a by_ids batch.",
+    )
+    number: str | None = Field(
+        default=None,
+        description=(
+            "Sequential document number within its `document_type` (orders and invoices "
+            "have separate counters — e.g. order='420260002', invoice='20260001'). "
+            "Use this as `číslo dokladu` in accounting records. NOT a payment "
+            "identifier; see `variable_symbol` for that."
+        ),
+    )
+    variable_symbol: str | None = Field(
+        default=None,
+        description=(
+            "Customer-facing payment identifier (VS). The same value appears on the "
+            "order and on the invoice generated from it — both inherit the order's VS. "
+            "Match this against the VS in a Fio incoming payment."
+        ),
+    )
+    document_type: str | None = Field(
+        default=None,
+        description=(
+            "Decoded document type label (e.g. 'order', 'invoice', 'tax_document'). The "
+            "raw numeric code is available via simpleshop_get_metadata.document_types."
+        ),
+    )
+    parent_id: int | None = Field(
+        default=None,
+        description=(
+            "Id of the originating order, set on invoices and tax_documents generated "
+            "from an order. Use to trace which order produced a given invoice without "
+            "re-querying by VS. For accounting records, prefer the invoice's `number`."
+        ),
+    )
     states: DocumentStates | None = None
     dates: DocumentDates | None = None
-    currency: str | None = None
-    total: str | None = None
-    total_without_vat: str | None = None
+    currency: str | None = Field(default=None, description="ISO 4217 currency code, e.g. 'CZK'.")
+    total: str | None = Field(
+        default=None,
+        description="Document total including VAT (decimal string, two-place precision).",
+    )
+    total_without_vat: str | None = Field(
+        default=None,
+        description="Document total excluding VAT (decimal string, two-place precision).",
+    )
     payment_instructions: PaymentInstructions = Field(default_factory=PaymentInstructions)
     customer: dict[str, Any] = Field(default_factory=dict)
     product_ids: list[int] = Field(default_factory=list)
@@ -983,7 +1251,12 @@ class SearchCursor(BaseModel):
 
 @mcp.tool
 async def simpleshop_test_login(ctx: Context) -> TestLoginResult:
-    """Check whether SimpleShop credentials are configured and accepted by the API."""
+    """Verify configured SimpleShop credentials by issuing a single read-only API call.
+
+    Returns ok=True on success or an error code (not_logged_in, unauthorized,
+    forbidden, simpleshop_error, network_error). Use this once after
+    simpleshop_login to confirm setup; not needed before every other tool.
+    """
     client = _client_from_context(ctx)
     if not client.is_authenticated():
         return TestLoginResult(
@@ -1036,7 +1309,42 @@ async def simpleshop_find_documents(
     ],
     ctx: Context,
 ) -> FindDocumentsResult:
-    """Find SimpleShop documents by search filters or explicit document IDs."""
+    """Find SimpleShop documents (orders, invoices, advance_invoices, proformas,
+    payment_requests, tax_documents, receipts) by filters or by explicit IDs.
+
+    USE FOR: matching Fio incoming payments to SimpleShop documents via VS,
+    monthly accounts receivable review, bulk PDF preparation via
+    simpleshop_download_documents.
+
+    KEY GOTCHAS:
+    1. `variable_symbol` is the customer-facing payment identifier. An order
+       and the invoice generated from it share the same `variable_symbol`. To
+       find both in one call, pass document_types=['order','invoice',
+       'tax_document'] alongside `variable_symbol`. Use `parent_id` on the
+       invoice to confirm the order→invoice link.
+    2. `number` is the document's sequential identifier within its type
+       (orders and invoices have independent counters). NOT the same as
+       `variable_symbol`. Use the invoice's `number` as `číslo dokladu` in
+       accounting records.
+    3. Orders are EXCLUDED from default `document_types` — pass ['order']
+       explicitly (or alongside others) if you need them. The default focuses
+       on the recognized accounting documents.
+    4. Cursor encodes a filter hash; changing any filter between paginated
+       calls invalidates the cursor. Start fresh without `cursor` for a new
+       filter set.
+
+    EXAMPLE (monthly reconciliation):
+      mode='search', paid_from='2026-05-01', paid_to='2026-05-31',
+      payment_state='paid', document_types=['invoice','tax_document']
+      → iterate next_cursor; cross-check control_totals.
+
+    EXAMPLE (match a Fio payment with VS '420260002'):
+      mode='search', variable_symbol='420260002',
+      document_types=['order','invoice','tax_document']
+      → returns the order (number='420260002') and the derived invoice
+        (number='20260001', parent_id=<order id>). Record the invoice in
+        accounting.
+    """
     client = _client_from_context(ctx)
     if query.mode == "by_ids":
         return await _find_documents_by_ids(client, query)
@@ -1047,10 +1355,44 @@ async def simpleshop_find_documents(
 @_requires_login
 async def simpleshop_download_documents(
     ctx: Context,
-    documents: list[DownloadDocumentRequest] = Field(min_length=1, max_length=100),
-    max_bytes: int = Field(default=25_000_000, ge=1),
+    documents: Annotated[
+        list[DownloadDocumentRequest],
+        Field(
+            min_length=1,
+            max_length=100,
+            description=(
+                "Documents to download (1–100 per call). Each item is "
+                "`{id, variant: 'with_stamp' | 'without_stamp'}`; variant defaults to "
+                "`with_stamp` (signed/official, suitable for accounting)."
+            ),
+        ),
+    ],
+    max_bytes: Annotated[
+        int,
+        Field(
+            default=25_000_000,
+            ge=1,
+            description=(
+                "Maximum total batch size in bytes (default ~25 MB). If the batch would "
+                "exceed this limit, the offending documents return a `max_bytes_exceeded` "
+                "error and earlier documents are returned successfully."
+            ),
+        ),
+    ] = 25_000_000,
 ) -> DownloadDocumentsResult:
-    """Batch-download the PDF rendering of SimpleShop documents."""
+    """Batch-download PDF renderings of SimpleShop documents (base64-encoded).
+
+    USE FOR: archiving documents locally or to Drive; bulk invoice export for
+    an accountant. Discover IDs first with simpleshop_find_documents.
+
+    KEY GOTCHAS:
+    1. Hard cap of 100 documents per call and `max_bytes` total payload.
+    2. `with_stamp` vs `without_stamp` — accounting workflows usually want
+       `with_stamp` (signed/official).
+    3. Large batches may exceed the MCP client's token limit even within
+       max_bytes; consider chunking (e.g. 10 docs per call) for invoices
+       with many line items.
+    """
     client = _client_from_context(ctx)
     results = []
     total_bytes = 0
@@ -1101,7 +1443,25 @@ async def simpleshop_find_products(
     ],
     ctx: Context,
 ) -> FindProductsResult:
-    """Find SimpleShop products by search filters or explicit product IDs."""
+    """Find SimpleShop products (physical goods, digital goods, services) by
+    filter or by explicit IDs.
+
+    USE FOR: looking up product codes/names for sales reports, cross-referencing
+    product sales with line items on invoices, building a product master list.
+
+    KEY GOTCHAS:
+    1. With include_variants=true (default) the response includes per-variant
+       rows (sizes, colors). For accounting workflows you typically only need
+       the parent product — pass include_variants=false to reduce response size.
+    2. Search is text-only via `search_text`; for specific products use
+       mode='by_ids'.
+
+    EXAMPLE (find merch products):
+      mode='search', search_text='merch', limit=50
+
+    EXAMPLE (look up specific product details):
+      mode='by_ids', ids=[145235, 146969], include_variants=true
+    """
     client = _client_from_context(ctx)
     if query.mode == "by_ids":
         return await _find_products_by_ids(client, query)
@@ -1112,21 +1472,80 @@ async def simpleshop_find_products(
 @_requires_login
 async def simpleshop_get_product_sales(
     ctx: Context,
-    product_ids: list[int] = Field(min_length=1, max_length=100),
-    scope: StrictMode = Field(default="api_default"),
-    max_sales_rows: int = Field(
-        default=100,
-        ge=1,
-        le=5000,
-        description="Maximum normalized sales rows returned per product.",
-    ),
-    include_customer_pii: bool = Field(
-        default=False,
-        description="Return buyer name/contact/address fields. Defaults to redacted.",
-    ),
-    include_raw_csv: bool = False,
+    product_ids: Annotated[
+        list[int],
+        Field(
+            min_length=1,
+            max_length=100,
+            description=(
+                "Product IDs to query (1–100). Returns one ProductSales entry per id, "
+                "preserving order; each entry may carry its own error."
+            ),
+        ),
+    ],
+    scope: Annotated[
+        StrictMode,
+        Field(
+            default="api_default",
+            description=(
+                "API scope: 'api_default' delegates to SimpleShop's default. Other values "
+                "exist for legacy strict modes — see simpleshop_get_metadata."
+            ),
+        ),
+    ] = "api_default",
+    max_sales_rows: Annotated[
+        int,
+        Field(
+            default=100,
+            ge=1,
+            le=5000,
+            description=(
+                "Maximum normalized sales rows returned per product (1–5000, default 100). "
+                "If a product has more sales, the response includes `truncated=true` and "
+                "`total_rows` so you know more data exists."
+            ),
+        ),
+    ] = 100,
+    include_customer_pii: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=(
+                "Defaults to `false` (buyer name/contact/address redacted). Set `true` "
+                "when generating donor/customer confirmations or audit-level exports. "
+                "Required when `include_raw_csv=true`."
+            ),
+        ),
+    ] = False,
+    include_raw_csv: Annotated[
+        bool,
+        Field(
+            default=False,
+            description=(
+                "Defaults to `false`. Set `true` to include the raw semicolon-delimited "
+                "SimpleShop CSV alongside the normalized rows. Requires "
+                "`include_customer_pii=true` so PII is not exposed accidentally."
+            ),
+        ),
+    ] = False,
 ) -> ProductSalesResult:
-    """Return SimpleShop product sales using the 'who bought' export."""
+    """Return normalized 'who bought' rows for one or more products.
+
+    Each row is a single buyer + purchase instance — repeats appear if the
+    same customer bought the same product multiple times.
+
+    USE FOR: sales-ledger generation, customer cohort analysis, cross-
+    referencing invoices by product line.
+
+    KEY GOTCHAS:
+    1. Buyer PII is redacted by default; opt in only when the downstream task
+       (confirmation, audit) requires it.
+    2. Per-product cap via `max_sales_rows`. When exceeded, the response has
+       `truncated=true` and `total_rows`.
+    3. `include_raw_csv=true` returns the original semicolon-delimited CSV
+       (requires `include_customer_pii=true`) — convenient when piping into a
+       spreadsheet.
+    """
     if include_raw_csv and not include_customer_pii:
         raise ValueError("include_raw_csv requires include_customer_pii=true")
     client = _client_from_context(ctx)
@@ -1168,14 +1587,51 @@ async def simpleshop_get_product_sales(
 @_requires_login
 async def simpleshop_get_metadata(
     ctx: Context,
-    include_payment_methods: bool = True,
-    include_number_series: bool = True,
-    include_tags: bool = True,
-    include_document_types: bool = True,
-    include_product_types: bool = True,
-    include_flags: bool = True,
+    include_payment_methods: Annotated[
+        bool,
+        Field(description="Include payment methods. Default true; pass false to skip."),
+    ] = True,
+    include_number_series: Annotated[
+        bool,
+        Field(description="Include document number series (id, name). Default true."),
+    ] = True,
+    include_tags: Annotated[
+        bool,
+        Field(description="Include document tags for categorization. Default true."),
+    ] = True,
+    include_document_types: Annotated[
+        bool,
+        Field(
+            description=(
+                "Include document type codes and labels (invoice, order, proforma, …). "
+                "Default true. Recommended."
+            ),
+        ),
+    ] = True,
+    include_product_types: Annotated[
+        bool,
+        Field(description="Include product type codes and labels. Default true."),
+    ] = True,
+    include_flags: Annotated[
+        bool,
+        Field(
+            description=(
+                "Include document flag codes (paid, canceled, archived, test_mode, "
+                "has_vat, oss, overpayment, underpayment, need_attention). Default true."
+            ),
+        ),
+    ] = True,
 ) -> MetadataResult:
-    """Return SimpleShop metadata useful for filtering and accounting classification."""
+    """Return SimpleShop reference metadata: payment methods, number series, tags,
+    document types (with relationships), product types, flags, and field-format
+    conventions. Read-only; recommended to call once at session start and cache.
+
+    USE FOR: discovering valid filter values; understanding document type codes;
+    decoding DocumentStates flags; learning order↔invoice relationships via
+    `parent_id`.
+
+    Each `include_*` flag defaults to `true`; pass `false` only to reduce payload.
+    """
     client = _client_from_context(ctx)
     return MetadataResult(
         source_documents=[
