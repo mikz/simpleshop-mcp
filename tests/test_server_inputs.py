@@ -339,7 +339,12 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
         )
     )
 
-    payload = _document_payload(record, include_pdf_resources=True)
+    payload = _document_payload(
+        record,
+        include_pdf_resources=True,
+        include_payment_instructions=True,
+        include_line_items=True,
+    )
 
     assert _product_ids_from_record(record) == [145235]
     assert payload.ok is True
@@ -351,6 +356,7 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
     assert payload.payment_instructions.amount == "1206.64"
     assert payload.payment_instructions.currency == "CZK"
     assert payload.payment_instructions.payment_method_id == 33662
+    assert len(payload.line_items) == 1
     assert payload.product_ids == [145235]
     assert payload.pdf_resources[0].resource_uri.endswith("/with_stamp")
     assert payload.customer["redacted"] is True
@@ -366,6 +372,38 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
         include_customer_pii=True,
     )
     assert payload_with_pii.customer["email"] == "buyer@example.com"
+
+
+def test_document_payload_omits_line_items_and_payment_instructions_by_default() -> None:
+    record = normalize_invoice(
+        invoice_fixture(
+            items=[
+                {
+                    "quantity": "1",
+                    "unit": "ks",
+                    "text": "Product",
+                    "unit_price": "100",
+                    "vat_rate": "0",
+                    "vat_rate_type": 32,
+                    "vat": "0",
+                    "total": "100",
+                    "total_without_vat": "100",
+                }
+            ]
+        )
+    )
+
+    payload = _document_payload(record, include_pdf_resources=False)
+
+    # core reconciliation fields stay populated regardless of opt-ins
+    assert payload.variable_symbol == "72600024"
+    assert payload.currency == "CZK"
+    assert payload.total == "1206.64"
+
+    # opt-in heavy fields are empty by default to keep responses small
+    assert payload.line_items == []
+    assert payload.payment_instructions.variable_symbol is None
+    assert payload.payment_instructions.bank_account is None
 
 
 def test_human_state_filters_match_normalized_documents() -> None:

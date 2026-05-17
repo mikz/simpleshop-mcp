@@ -729,6 +729,24 @@ class FindDocumentsQuery(BaseModel):
             "document; pair with simpleshop_download_documents to fetch the actual PDF."
         ),
     )
+    include_line_items: bool = Field(
+        default=False,
+        description=(
+            "Defaults to `false`. Set `true` to include the per-document `line_items` "
+            "array. Line items are the biggest contributor to response size for typical "
+            "invoices (1–5 items × ~200 bytes each); omit them unless you need item-level "
+            "detail for audit, sales-by-product analysis, or invoice reconciliation."
+        ),
+    )
+    include_payment_instructions: bool = Field(
+        default=False,
+        description=(
+            "Defaults to `false`. Set `true` to include the `payment_instructions` block "
+            "(bank_account, IBAN, BIC, constant_symbol, specific_symbol, amount, "
+            "payment_method_id). Most accounting reconciliation only needs the top-level "
+            "`variable_symbol`, `currency`, and `total` — which are populated regardless."
+        ),
+    )
     include_raw: bool = Field(
         default=False,
         description=(
@@ -1006,6 +1024,8 @@ class FoundDocument(BaseModel):
         *,
         include_pdf_resources: bool,
         include_customer_pii: bool,
+        include_line_items: bool = False,
+        include_payment_instructions: bool = False,
     ) -> FoundDocument:
         return cls(
             id=record.id,
@@ -1033,11 +1053,17 @@ class FoundDocument(BaseModel):
             currency=record.currency,
             total=_format_money(record.total),
             total_without_vat=_format_money(record.total_without_vat),
-            payment_instructions=record.payment_instructions,
+            payment_instructions=(
+                record.payment_instructions if include_payment_instructions else PaymentInstructions()
+            ),
             customer=_customer_payload(record, include_customer_pii=include_customer_pii),
             product_ids=_product_ids_from_record(record),
             pdf_resources=_pdf_resources(record) if include_pdf_resources else [],
-            line_items=[_line_item_payload(item) for item in record.line_items],
+            line_items=(
+                [_line_item_payload(item) for item in record.line_items]
+                if include_line_items
+                else []
+            ),
         )
 
 
@@ -1332,6 +1358,12 @@ async def simpleshop_find_documents(
     4. Cursor encodes a filter hash; changing any filter between paginated
        calls invalidates the cursor. Start fresh without `cursor` for a new
        filter set.
+    5. Default response is lean: `line_items` and `payment_instructions` are
+       empty unless you opt in via `include_line_items=true` /
+       `include_payment_instructions=true`. Core reconciliation fields
+       (`variable_symbol`, `currency`, `total`, dates, states, `parent_id`)
+       are always present. Opt in only when you need per-item detail or full
+       bank-routing info — those fields more than double per-document size.
 
     EXAMPLE (monthly reconciliation):
       mode='search', paid_from='2026-05-01', paid_to='2026-05-31',
@@ -1714,6 +1746,8 @@ async def _find_documents_by_search(
                 record,
                 include_pdf_resources=query.include_pdf_resources,
                 include_customer_pii=query.include_customer_pii,
+                include_line_items=query.include_line_items,
+                include_payment_instructions=query.include_payment_instructions,
             )
             for record in records
         ],
@@ -1750,6 +1784,8 @@ async def _find_documents_by_ids(
                 record,
                 include_pdf_resources=query.include_pdf_resources,
                 include_customer_pii=query.include_customer_pii,
+                include_line_items=query.include_line_items,
+                include_payment_instructions=query.include_payment_instructions,
             )
             payload.ok = True
             if query.include_raw:
@@ -1903,11 +1939,15 @@ def _document_payload(
     *,
     include_pdf_resources: bool,
     include_customer_pii: bool = False,
+    include_line_items: bool = False,
+    include_payment_instructions: bool = False,
 ) -> FoundDocument:
     return FoundDocument.from_accounting_document(
         record,
         include_pdf_resources=include_pdf_resources,
         include_customer_pii=include_customer_pii,
+        include_line_items=include_line_items,
+        include_payment_instructions=include_payment_instructions,
     )
 
 
