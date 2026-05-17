@@ -1,326 +1,80 @@
 # Tool Reference
 
-All tools are read-only. They never create, update, delete, pay, send, or mutate
-SimpleShop data.
+Operational notes for maintainers running the simpleshop-mcp server. All
+runtime information that an LLM client needs to use the tools — parameter
+descriptions, defaults, query mode semantics, document types, flags,
+cursor-drift behavior, error codes — is exported through the MCP JSON
+Schema and the `simpleshop_get_metadata` tool response. This file is for
+humans who maintain the server.
 
-The exposed hard-cut surface is:
+## Read-only contract
 
-```text
-simpleshop_login
-simpleshop_test_login
-simpleshop_find_documents
-simpleshop_download_documents
-simpleshop_find_products
-simpleshop_get_product_sales
-simpleshop_get_metadata
+All tools are read-only. They never create, update, delete, pay, send, or
+mutate SimpleShop data. `simpleshop_login` only mutates local credential
+storage.
+
+## Authentication and credential storage
+
+`simpleshop_login` accepts `mode` = `auto` / `direct` / `prefab` / `web`.
+
+- `auto` picks Prefab when the MCP client advertises Apps UI support, else
+  returns a localhost web-login URL.
+- `direct` requires `credentials.email` and `credentials.api_key` in the
+  tool call. Use for headless clients.
+
+Credentials are scoped to the server-process `cwd` and stored in:
+
+- Primary: system keyring service `simpleshop-mcp:<scope-id>`.
+- Fallback: `${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/scopes/<scope-id>/credentials.env`
+  with mode `0600`.
+
+### Pre-seeded credentials
+
+Set `SIMPLESHOP_LOGIN` and `SIMPLESHOP_API_KEY` to seed credentials at
+startup, or place a `credentials.env` file in the cwd-scoped credential
+store.
+
+```bash
+export SIMPLESHOP_LOGIN="company@example.com"
+export SIMPLESHOP_API_KEY="..."
 ```
 
-## Query Modes
+## Settings
 
-Finder tools use one concrete `query` object. The discovered MCP schema exposes
-`query` as `type: object`, requires `mode`, rejects unknown keys, and includes
-examples. Agents should never pass a string such as `query: ""`.
+| Variable | Default | Purpose |
+|---|---|---|
+| `SIMPLESHOP_BASE_URL` | `https://api.simpleshop.cz/` | Override only for tests / sandboxes |
+| `SIMPLESHOP_TIMEOUT_SECONDS` | `30` | Per-request timeout |
 
-```json
-{
-  "query": {
-    "mode": "search"
-  }
-}
-```
+## Cursor pagination
 
-or:
+All search-mode finders use opaque base64 cursors that embed a hash of the
+explicit filters used to produce them. The server rejects cursor / filter
+drift (returns a cursor-mismatch error) to protect against duplicate or
+missed records during audit. Response-shaping flags
+(`include_pdf_resources`, `include_raw`, `include_customer_pii`,
+`include_variants`, `include_line_items`, `include_payment_instructions`)
+are intentionally excluded from the cursor filter hash, so toggling those
+between paginated calls does not invalidate the cursor.
 
-```json
-{
-  "query": {
-    "mode": "by_ids",
-    "ids": [123]
-  }
-}
-```
+FastMCP's built-in pagination still handles MCP component lists (tools /
+prompts / resources); business-data pagination is exclusively cursor-based.
 
-`search` mode rejects IDs and supports filters/cursors. `by_ids` mode requires
-IDs, ignores search filters, and returns per-ID success or error results.
+## Side effects to remember
 
-Search cursors are opaque base64 JSON containing version, result kind, offset,
-limit, sort, and a hash of the explicit filters. The request must repeat the same
-filters when passing a cursor; the server rejects cursor/filter drift. FastMCP's
-built-in pagination remains for MCP component lists only, not business data pages.
-Response-shaping flags such as `include_pdf_resources`, `include_raw`,
-`include_customer_pii`, and `include_variants` are deliberately excluded from the
-cursor filter hash.
+`simpleshop_login` writes to keyring + scoped credential file. No tool
+mutates SimpleShop data; all reads are GET requests.
 
-## `simpleshop_login`
+## Troubleshooting
 
-Collect SimpleShop credentials through one login tool. `mode` accepts `auto`,
-`direct`, `prefab`, or `web`. `auto` uses Prefab when the MCP client advertises
-Apps UI support, otherwise it returns a localhost web-login URL. `direct` accepts
-`email` and `api_key` credentials in the tool call:
+| Symptom | Diagnosis |
+|---|---|
+| `not_logged_in` | Run `simpleshop_login` (or set `SIMPLESHOP_LOGIN` / `SIMPLESHOP_API_KEY` and restart) |
+| `unauthorized` (401) | Credentials rejected; check API key in SimpleShop account settings |
+| `forbidden` (403) | API key lacks required scope |
+| `network_error` | DNS / connect / timeout — verify `SIMPLESHOP_BASE_URL` and network |
+| `simpleshop_error` | Generic upstream failure; inspect raw payload for context |
+| cursor rejected | Filter set changed between paginated calls; restart pagination without `cursor` |
 
-- `email`: SimpleShop account email, used as the HTTP Basic username
-- `api_key`: API key from SimpleShop account settings
-
-Successful login stores credentials in a store scoped to the server process
-`cwd`: OS keyring service `simpleshop-mcp:<scope-id>` when available, plus
-`${XDG_CONFIG_HOME:-$HOME/.config}/simpleshop-mcp/scopes/<scope-id>/credentials.env`
-with mode `0600`.
-
-Clients can also pre-seed credentials with `SIMPLESHOP_LOGIN` /
-`SIMPLESHOP_API_KEY` or the cwd-scoped credential store.
-
-## `simpleshop_test_login`
-
-Verify that current credentials are configured and accepted by SimpleShop. Hits
-the `GET test/` endpoint with no side effects. Takes no arguments.
-
-```json
-{ "ok": true }
-```
-
-When credentials are rejected or the API is unreachable:
-
-```json
-{
-  "ok": false,
-  "error": { "code": "unauthorized", "message": "Authentication failed - company not found." }
-}
-```
-
-When no credentials are available:
-
-```json
-{
-  "ok": false,
-  "error": { "code": "not_logged_in", "message": "No SimpleShop credentials configured. Call simpleshop_login first." }
-}
-```
-
-Error codes: `not_logged_in`, `unauthorized` (401), `forbidden` (403),
-`simpleshop_error` (other API failures), `network_error` (DNS/connect/timeout).
-
-## `simpleshop_find_documents`
-
-Find documents through SimpleShop's `/invoice/` API, which covers more than
-invoices.
-
-```json
-{
-  "query": {
-    "mode": "search",
-    "created_from": "2026-05-01",
-    "created_to": "2026-05-31",
-    "paid_from": "2026-05-01",
-    "paid_to": "2026-05-31",
-    "document_types": [
-      "invoice",
-      "advance_invoice",
-      "proforma",
-      "payment_request",
-      "tax_document",
-      "receipt"
-    ],
-    "test_mode": "production",
-    "limit": 100,
-    "cursor": null,
-    "include_pdf_resources": false
-  }
-}
-```
-
-When `document_types` is omitted or empty in search mode, the default is the
-same reconciliation-oriented set shown above. Orders are intentionally excluded
-because they often share the same variable symbol and amount as the resulting
-invoice. Pass `document_types: ["order"]` explicitly for order/fulfillment
-workflows, or include `order` explicitly when duplicate payment candidates are
-useful context.
-
-Explicit IDs:
-
-```json
-{
-  "query": {
-    "mode": "by_ids",
-    "ids": [12038161],
-    "include_pdf_resources": true
-  }
-}
-```
-
-Document types:
-
-```text
-invoice
-advance_invoice
-proforma
-payment_request
-tax_document
-credit_tax_document
-receipt
-credit_document
-order
-expense
-quote
-```
-
-Flags are composable bitmask states:
-
-```text
-has_vat
-paid
-sent_to_customer
-canceled
-reminder_sent
-overpayment
-underpayment
-downloaded_by_accountant
-awaiting_shipping_export
-archived
-oss
-```
-
-Use `exact_flags`, `has_any_flags`, `has_all_flags`, and `without_flags`.
-
-Paid-date search uses `paid_from` and `paid_to`. The server translates these to
-SimpleShop's documented `date_paid` filter expression with `GTEQ` and `LTEQ`;
-there is no exact-date `paid_at` query field. For an exact day, pass the same
-date to both fields.
-
-The response includes document metadata, `variable_symbol`, `currency`, `total`,
-`total_without_vat`, normalized `payment_instructions`, redacted customer
-presence flags, line items, product IDs found in line item metadata, optional PDF
-resource URIs, and control totals for search mode. Money values are fixed
-two-decimal strings, for example `"1206.64"`.
-
-`payment_instructions` uses Fio-compatible field names for intended receiving
-account details: `bank_account`, `iban`, `bic`, `variable_symbol`,
-`constant_symbol`, `specific_symbol`, `amount`, `currency`, and
-`payment_method_id`. SimpleShop exposes intended receiving-account instructions
-and document paid state, not matched bank transaction evidence. If you
-explicitly request orders too, use `document_type` and `parent_id` to distinguish
-orders from the resulting accounting documents. Set `include_customer_pii: true`
-to return full customer name/contact/address fields. `include_raw` also requires
-`include_customer_pii: true` because raw SimpleShop document payloads contain
-customer data.
-
-## `simpleshop_download_documents`
-
-Batch-download PDF renderings of documents.
-
-```json
-{
-  "documents": [
-    {
-      "id": 12038161,
-      "variant": "with_stamp"
-    }
-  ],
-  "max_bytes": 25000000
-}
-```
-
-Variants:
-
-```text
-with_stamp
-without_stamp
-```
-
-These map to SimpleShop's `url_download_pdf` and
-`url_download_pdf_no_stamp` fields. Responses are per item and include filename,
-MIME type, size, SHA-256, and `content_base64`.
-
-The same PDFs are exposed as MCP resources:
-
-```text
-simpleshop://documents/{document_id}/pdf/{variant}
-```
-
-## `simpleshop_find_products`
-
-Search mode lists products through verified `GET product/`, then filters locally
-over typed `RawProduct` models:
-
-```json
-{
-  "query": {
-    "mode": "search",
-    "search_text": "merch",
-    "product_types": ["physical_goods"],
-    "include_archived": false,
-    "test_mode": "production",
-    "include_variants": true,
-    "limit": 100,
-    "cursor": null
-  }
-}
-```
-
-ID mode fetches products through verified `GET product/{id}/`:
-
-```json
-{
-  "query": {
-    "mode": "by_ids",
-    "ids": [145235],
-    "include_variants": true
-  }
-}
-```
-
-Product types:
-
-```text
-ebook
-video_audio
-membership
-physical_goods
-ticket
-course_online
-course_live
-voucher
-sales_form
-service
-```
-
-## `simpleshop_get_product_sales`
-
-Batch wrapper around SimpleShop's "Kdo koupil" product sales export.
-
-```json
-{
-  "product_ids": [145235],
-  "scope": "all_sales",
-  "max_sales_rows": 100,
-  "include_customer_pii": false,
-  "include_raw_csv": false
-}
-```
-
-Scopes:
-
-```text
-api_default
-all_sales
-only_this_form
-```
-
-The response returns per-product `ok/error` results, `total_rows`,
-`returned_rows`, `truncated`, and normalized sales rows. Buyer name/contact fields
-and custom form fields are redacted by default. Set `include_customer_pii: true`
-to return them. `include_raw_csv` requires `include_customer_pii: true`.
-
-## `simpleshop_get_metadata`
-
-Return lookup data used for filtering and classification.
-
-```json
-{
-  "include_payment_methods": true,
-  "include_number_series": true,
-  "include_tags": true,
-  "include_document_types": true,
-  "include_product_types": true,
-  "include_flags": true
-}
-```
+The complete error-code catalog and field-format conventions are in
+`simpleshop_get_metadata`.
