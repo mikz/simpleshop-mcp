@@ -166,13 +166,11 @@ def test_filter_hashes_ignore_response_shaping_flags() -> None:
     documents = FindDocumentsQuery(
         mode="search",
         search_text="abc",
-        include_pdf_resources=True,
         include_raw=False,
     )
     documents_same_filters = FindDocumentsQuery(
         mode="search",
         search_text="abc",
-        include_pdf_resources=False,
         include_raw=True,
         include_customer_pii=True,
     )
@@ -319,7 +317,7 @@ async def test_explicit_order_search_returns_orders() -> None:
     assert result.documents[0].document_type == "order"
 
 
-def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
+def test_document_payload_extracts_product_ids() -> None:
     record = normalize_invoice(
         invoice_fixture(
             items=[
@@ -341,7 +339,6 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
 
     payload = _document_payload(
         record,
-        include_pdf_resources=True,
         include_payment_instructions=True,
         include_line_items=True,
     )
@@ -358,7 +355,6 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
     assert payload.payment_instructions.payment_method_id == 33662
     assert len(payload.line_items) == 1
     assert payload.product_ids == [145235]
-    assert payload.pdf_resources[0].resource_uri.endswith("/with_stamp")
     assert payload.customer["redacted"] is True
     assert "email" not in payload.customer
     payload_json = payload.model_dump_json()
@@ -368,7 +364,6 @@ def test_document_payload_extracts_product_ids_and_pdf_resources() -> None:
 
     payload_with_pii = _document_payload(
         record,
-        include_pdf_resources=True,
         include_customer_pii=True,
     )
     assert payload_with_pii.customer["email"] == "buyer@example.com"
@@ -393,7 +388,7 @@ def test_document_payload_omits_line_items_and_payment_instructions_by_default()
         )
     )
 
-    payload = _document_payload(record, include_pdf_resources=False)
+    payload = _document_payload(record)
 
     # core reconciliation fields stay populated regardless of opt-ins
     assert payload.variable_symbol == "72600024"

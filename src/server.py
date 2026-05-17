@@ -491,13 +491,11 @@ class FindDocumentsQuery(BaseModel):
                     ],
                     "test_mode": "production",
                     "limit": 100,
-                    "include_pdf_resources": False,
                     "include_customer_pii": False,
                 },
                 {
                     "mode": "by_ids",
                     "ids": [12038161, 12019951],
-                    "include_pdf_resources": True,
                     "include_customer_pii": False,
                 },
             ]
@@ -721,14 +719,6 @@ class FindDocumentsQuery(BaseModel):
             "send. Rarely needed; prefer the structured filters above."
         ),
     )
-    include_pdf_resources: bool = Field(
-        default=False,
-        description=(
-            "Defaults to `false`. Set `true` to include PDF download URIs (with_stamp / "
-            "without_stamp variants) in the response. Adds noticeable bytes per "
-            "document; pair with simpleshop_download_documents to fetch the actual PDF."
-        ),
-    )
     include_line_items: bool = Field(
         default=False,
         description=(
@@ -932,13 +922,6 @@ class ErrorInfo(BaseModel):
     message: str
 
 
-class PdfResource(BaseModel):
-    variant: DocumentVariant
-    filename: str
-    mime_type: str = "application/pdf"
-    resource_uri: str
-
-
 class DocumentStates(BaseModel):
     paid: bool
     canceled: bool
@@ -1012,7 +995,6 @@ class FoundDocument(BaseModel):
     payment_instructions: PaymentInstructions = Field(default_factory=PaymentInstructions)
     customer: dict[str, Any] = Field(default_factory=dict)
     product_ids: list[int] = Field(default_factory=list)
-    pdf_resources: list[PdfResource] = Field(default_factory=list)
     line_items: list[dict[str, Any]] = Field(default_factory=list)
     raw: dict[str, Any] | None = None
     error: ErrorInfo | None = None
@@ -1022,7 +1004,6 @@ class FoundDocument(BaseModel):
         cls,
         record: AccountingDocument,
         *,
-        include_pdf_resources: bool,
         include_customer_pii: bool,
         include_line_items: bool = False,
         include_payment_instructions: bool = False,
@@ -1058,7 +1039,6 @@ class FoundDocument(BaseModel):
             ),
             customer=_customer_payload(record, include_customer_pii=include_customer_pii),
             product_ids=_product_ids_from_record(record),
-            pdf_resources=_pdf_resources(record) if include_pdf_resources else [],
             line_items=(
                 [_line_item_payload(item) for item in record.line_items]
                 if include_line_items
@@ -1445,22 +1425,6 @@ async def simpleshop_download_documents(
     return DownloadDocumentsResult(documents=results)
 
 
-@mcp.resource("simpleshop://documents/{document_id}/pdf/{variant}", mime_type="application/pdf")
-async def simpleshop_document_pdf(
-    document_id: int,
-    variant: DocumentVariant,
-    ctx: Context,
-) -> bytes:
-    """Read one SimpleShop document PDF as an MCP resource."""
-    client = _client_from_context(ctx)
-    raw = await client.get_invoice(document_id)
-    url = _pdf_url(raw, variant)
-    if not url:
-        raise SimpleShopError("No PDF URL available for document", payload={"id": document_id})
-    content, _content_type = await client.download_url(url)
-    return content
-
-
 @mcp.tool
 @_requires_login
 async def simpleshop_find_products(
@@ -1744,7 +1708,6 @@ async def _find_documents_by_search(
         documents=[
             _document_payload(
                 record,
-                include_pdf_resources=query.include_pdf_resources,
                 include_customer_pii=query.include_customer_pii,
                 include_line_items=query.include_line_items,
                 include_payment_instructions=query.include_payment_instructions,
@@ -1782,7 +1745,6 @@ async def _find_documents_by_ids(
             record = normalize_invoice(raw)
             payload = _document_payload(
                 record,
-                include_pdf_resources=query.include_pdf_resources,
                 include_customer_pii=query.include_customer_pii,
                 include_line_items=query.include_line_items,
                 include_payment_instructions=query.include_payment_instructions,
@@ -1937,14 +1899,12 @@ async def _find_products_by_ids(
 def _document_payload(
     record: AccountingDocument,
     *,
-    include_pdf_resources: bool,
     include_customer_pii: bool = False,
     include_line_items: bool = False,
     include_payment_instructions: bool = False,
 ) -> FoundDocument:
     return FoundDocument.from_accounting_document(
         record,
-        include_pdf_resources=include_pdf_resources,
         include_customer_pii=include_customer_pii,
         include_line_items=include_line_items,
         include_payment_instructions=include_payment_instructions,
@@ -1969,21 +1929,6 @@ def _customer_payload(
         "has_phone": bool(customer.phone),
         "has_address": bool(customer.street or customer.city or customer.postal_code),
     }
-
-
-def _pdf_resources(record: AccountingDocument) -> list[PdfResource]:
-    return [
-        PdfResource(
-            variant="with_stamp",
-            filename=_pdf_filename(record.number, "with_stamp"),
-            resource_uri=f"simpleshop://documents/{record.id}/pdf/with_stamp",
-        ),
-        PdfResource(
-            variant="without_stamp",
-            filename=_pdf_filename(record.number, "without_stamp"),
-            resource_uri=f"simpleshop://documents/{record.id}/pdf/without_stamp",
-        ),
-    ]
 
 
 def _product_ids_from_record(record: AccountingDocument) -> list[int]:

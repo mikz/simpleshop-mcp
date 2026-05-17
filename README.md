@@ -38,8 +38,6 @@ Requirements on the host machine:
   advance invoices, proformas, payment requests, tax documents, and receipts.
   Orders are explicit because they often duplicate invoice payment keys.
 - Batch-download document PDFs, with per-document success/error results.
-- Expose document PDFs as MCP resources:
-  `simpleshop://documents/{document_id}/pdf/{variant}`.
 - Find products through the SimpleShop product API.
 - Fetch and normalize SimpleShop "who bought" product sales exports.
 - Return metadata useful for accounting filters, including document types,

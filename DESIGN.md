@@ -61,7 +61,6 @@ Example:
       "test_mode": "production",
       "limit": 100,
       "cursor": null,
-      "include_pdf_resources": true,
       "include_customer_pii": false
     }
   }
@@ -78,7 +77,6 @@ Example:
     "query": {
       "mode": "by_ids",
       "ids": [12038161, 12019951],
-      "include_pdf_resources": true,
       "include_customer_pii": false
     }
   }
@@ -126,21 +124,7 @@ Response shape:
         "has_phone": true,
         "has_address": true
       },
-      "product_ids": [145235],
-      "pdf_resources": [
-        {
-          "variant": "with_stamp",
-          "filename": "20260019.pdf",
-          "mime_type": "application/pdf",
-          "resource_uri": "simpleshop://documents/12038161/pdf/with_stamp"
-        },
-        {
-          "variant": "without_stamp",
-          "filename": "20260019-without-stamp.pdf",
-          "mime_type": "application/pdf",
-          "resource_uri": "simpleshop://documents/12038161/pdf/without_stamp"
-        }
-      ]
+      "product_ids": [145235]
     }
   ],
   "next_cursor": null,
@@ -200,31 +184,24 @@ Response shape:
 
 Batch responses must be itemized. One failed document must not fail the entire batch.
 
-## MCP File Transfer
+## PDF download
 
-The preferred MCP-native file path is:
-
-```text
-resources/read simpleshop://documents/{document_id}/pdf/{variant}
-```
-
-where `variant` is:
-
-```text
-with_stamp
-without_stamp
-```
-
-These map to SimpleShop's documented PDF fields:
+PDFs are fetched only through the `simpleshop_download_documents` tool, which
+returns the bytes inline (base64) for each requested document. The two variants
+are:
 
 ```text
 with_stamp    -> url_download_pdf
 without_stamp -> url_download_pdf_no_stamp
 ```
 
-The direct `simpleshop_download_documents` tool exists for batch copy/export workflows
-that need bytes returned by a single tool call. For large batches it should be an
-async FastMCP background task.
+For large batches the tool should be an async FastMCP background task.
+
+(Earlier versions exposed PDFs as MCP resources at
+`simpleshop://documents/{id}/pdf/{variant}`. That path was removed in 0.3.4 —
+agent hosts that run the server in a sandbox can't reach the host-side blob the
+client materializes, so the resource was effectively dead. Use the download
+tool instead.)
 
 ## Product Workflow
 
@@ -393,9 +370,9 @@ to understand account-specific number series, payment methods, or tags.
 - Search cursors contain offset, limit, sort, and a hash of the explicit filter
   fields. The next request must repeat the same filters; the server rejects
   cursor/filter drift.
-- Response-shaping fields (`include_pdf_resources`, `include_raw`,
-  `include_customer_pii`, `include_variants`) are not part of the cursor hash, so
-  agents can change the returned detail level while continuing a search.
+- Response-shaping fields (`include_raw`, `include_customer_pii`,
+  `include_variants`) are not part of the cursor hash, so agents can change the
+  returned detail level while continuing a search.
 - Document and sales responses redact customer PII by default. Callers must set
   `include_customer_pii=true` to receive names, email, phone, address, company
   IDs, VAT IDs, custom sales fields, raw document payloads, or raw CSV.

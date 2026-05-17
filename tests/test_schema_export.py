@@ -62,7 +62,6 @@ async def test_find_documents_query_fields_have_descriptions(
         "payment_state",
         "limit",
         "cursor",
-        "include_pdf_resources",
         "include_customer_pii",
         "include_raw",
     ]
@@ -100,7 +99,7 @@ async def test_include_flags_state_default_false(
 ) -> None:
     """E5: each opt-in boolean must say 'Defaults to false' or equivalent in its description."""
     query = _properties(tool_schema["simpleshop_find_documents"], "query")
-    for flag in ("include_pdf_resources", "include_customer_pii", "include_raw"):
+    for flag in ("include_customer_pii", "include_raw"):
         description = query["properties"][flag].get("description", "").lower()  # type: ignore[index]
         assert "default" in description and "false" in description, (
             f"{flag} description should state the default explicitly; got: {description}"
